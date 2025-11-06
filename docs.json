@@ -9,20 +9,12 @@
   },
   "favicon": "/favicon.svg",
   "navigation": {
-    "tabs": [
-      {
-        "tab": "API reference",
-        "openapi": "api.yaml",
-        "groups": [
-          {
-            "group": "API documentation",
-            "pages": [
-              "api-reference/introduction"
-            ]
-          }
-        ]
-      }
-    ]
+    "groups": [
+    {
+      "group": "API reference",
+      "openapi": "apidoc.json"
+    }
+  ]
   },
   "logo": {
     "light": "/logo/light.svg",

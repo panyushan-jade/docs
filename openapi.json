@@ -1,0 +1,1152 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "后台api平台接口v1.0",
+    "version": "1.0",
+    "x-logo": {
+      "url": "taropay-logo.svg",
+      "altText": "TaroPay",
+      "backgroundColor": "transparent"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://sandbosx.taropay.com/api",
+      "description": "测试环境"
+    },
+    {
+      "url": "https://payment.taropay.com/api",
+      "description": "生产环境"
+    }
+  ],
+  "tags": [
+    {
+      "name": "接入指引",
+      "description": "\n## 一、基本原则\n### 环境信息\n| 类型         | 值                                 |\n|--------------|-----------------------------------|\n| 测试API地址  | https://sandbosx.taropay.com/api       |\n| 生产API地址  | https://payment.taropay.com/api       |\n| 服务器时间   | GMT+7                             |\n\n### 字符编码\n- 所有请求和响应均使用UTF-8编码\n\n### 参数格式：\n- 所有API接口都为POST请求\n- 请求和响应数据格式均为JSON：Content-Type: application/json;charset=utf-8\n\n### 返回参数：\n ```\n{\n  \"code\":0,\n  \"message\":\"SUCCESS\",\n  \"data\":{\n      ...\n  }\n} \n```\n| Field    | Type      | Description |\n|----------|-----------|------|\n| code     | Integer   | 0表示请求成功,非0表示失败  |\n| message  | String    | 响应消息                |\n| data     | Object    | 描述业务调用情况的返回值，具体请参照业务接口中每个接口的data值   |\n\n\n### 商户请求Header信息\n| Field        | Type   |      Reuired  | Description |\n|------------------|---------|---------|-----------------------|\n| X-API-TIMESTAMP  | string |   Yes   | 当前请求的时间戳，精确到毫秒  |\n| X-API-SIGN       | string |   Yes   | 签名字符串，详见签名机制  |\n| Content-Type     | string |   Yes   | 请求头类型   |\n\n### 平台回调商户Header信息\n| Field        | Type   |      Reuired  | Description |\n|------------------|---------|---------|-----------------------|\n| X-API-TIMESTAMP  | string |   Yes   | 当前请求的时间戳，精确到毫秒  |\n| X-API-SIGN       | string |   Yes   | 签名字符串，详见签名机制  |\n| Content-Type     | string |   Yes   | 请求头类型   |\n\n\n## 二、签名规则\n**商户在调用 Taropay API接口时，需将请求方法,请求路径,请求时间戳以及业务参数，按照 Taropay 约定好的形式，获取到对应的签名字符串，并作为请求头参数X-API-SIGN传递给 Taropay。**\n\n⚠️特别说明:空值不参与签名，请不要将空值的键值对加入到 PARAMS 字符串中！！！\n\n### 商户公私钥生成\n1. 使用RSA算法生成一对公私钥\n  - 生成RSA密钥对的工具：https://www.metools.info/code/c80.html\n  - 选择密钥长度2048位,密钥格式选择PKCS#8\n\n2. 将生成的公钥（PublicKey）提供给 Taropay（去除空格换行后在商户后台上传），用于 Taropay 验证商户请求的签名\n\n3. 将生成的私钥（PrivateKey）妥善保管，用于商户对请求数据进行签名\n\n### 签名步骤\n1. 签名前准备的数据如下：HTTP_METHOD + \"|\" + HTTP_REQUEST_PATH + \"|\" + TIMESTAMP + \"|\" + PARAMS连接完成后，对数据进行签名\n   - HTTP_METHOD: 请求方法，如POST\n   - HTTP_REQUEST_PATH: 请求路径，如/payin/create\n   - TIMESTAMP: 当前请求的时间戳，精确到毫秒\n   - PARAMS: 业务参数，按key的字典序排序后，拼接成 key=value&key=value 的形式\n2. 使用SHA256withRSA算法，使用您生成的私钥PrivateKey对准备好的数据进行签名\n\n### 完整示例\n对于如下请求\n| HTTP_METHOD | HTTP_REQUEST_PATH | TIMESTAMP |\n|----------|-----------|---------|\n| POST     | /payin/create | 1634567890121 |\n\nPARAMS:\n| Parameter| value |\n|----------|---------|\n| amount   | 100 |\n| price    | 100 |\n\n签名前的准备数据如下：\n- 设所有发送或者接收到的数据为集合M，将集合M内非空参数值的参数按照参数名ASCII码从小到大排序（字典序），使用URL键值对的格式（即key1=value1&key2=value2…）拼接成字符串：\n```\nString content = \"amount=100&price=100\";\n```\n- 将拼接的字符串content 与方法请求信息 MERTHOD 、URL和NONCE以\"|\"分隔拼接成新的字符串：\n```\nString signData = \"POST|/payin/create|1634567890121|\" + content;\n``` \n- 使用您生成的私钥（PrivateKey），对拼接成的数据使用私钥进行SHA256withRSA签名,即生成了用于向 API 服务器进行验证的最终签名\n\n### 签名工具参考\n### 示例（Java）：\n```java\nimport java.nio.charset.StandardCharsets;\nimport java.security.*;\nimport java.security.spec.PKCS8EncodedKeySpec;\nimport java.security.spec.X509EncodedKeySpec;\nimport java.util.*;\n\npublic class RequestRSASignUtil {\n\n    private static final String CHARSET = \"UTF-8\";\n\n    public static String getSign(String method,String path,String timestamp,Map<String,Object> objectMap,String privateKeyPem) throws Exception {\n        objectMap.remove(\"sign\");\n        String signedValue = method + \"|\" + path + \"|\" + timestamp + \"|\" + sortMapToString(objectMap);\n        System.out.println(\"signValue:\"+signedValue);\n        return signSHA256withRSA(signedValue,privateKeyPem,CHARSET);\n    }\n\n    public boolean verifySign(String method,String path,String timestamp,Map<String,Object> objectMap,String publicKeyPem,String sign) throws Exception {\n        objectMap.remove(\"sign\");\n        String signedValue = method + \"|\" + path + \"|\" + timestamp + \"|\" + sortMapToString(objectMap);\n        System.out.println(\"verifySign-signValue:\"+signedValue);\n        return verifySHA256withRSA(signedValue,publicKeyPem,sign);\n    }\n\n    /**\n    * HA256withRSA签名\n    */\n    public static String signSHA256withRSA(String content, String privateKeyPem, String charset) throws Exception {\n        // 1. 解析PEM格式私钥\n        String privateKeyPEM = privateKeyPem\n                .replace(\"-----BEGIN PRIVATE KEY-----\", \"\")\n                .replace(\"-----END PRIVATE KEY-----\", \"\")\n                .replaceAll(\"\\\\s+\", \"\");\n        byte[] keyBytes = Base64.getDecoder().decode(privateKeyPEM);\n        PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyBytes);\n        KeyFactory keyFactory = KeyFactory.getInstance(\"RSA\");\n        PrivateKey privateKey = keyFactory.generatePrivate(keySpec);\n\n        // 2. 签名\n        Signature signature = Signature.getInstance(\"SHA256withRSA\");\n        signature.initSign(privateKey);\n        signature.update(content.getBytes(charset));\n        byte[] signed = signature.sign();\n\n        // 3. Base64编码\n        return Base64.getEncoder().encodeToString(signed);\n    }\n\n    /**\n    * 验证SHA256withRSA签名\n    * @param content 签名内容\n    * @param signature 签名值\n    * @return 验证结果\n    */\n    public static boolean verifySHA256withRSA(String content,String publicKeyPem, String signature) throws Exception {\n        // 1. 解析PEM格式公钥\n        String publicKeyPEM = publicKeyPem\n                .replace(\"-----BEGIN PUBLIC KEY-----\", \"\")\n                .replace(\"-----END PUBLIC KEY-----\", \"\")\n                .replaceAll(\"\\\\s+\", \"\");\n        byte[] keyBytes = Base64.getDecoder().decode(publicKeyPEM);\n        X509EncodedKeySpec keySpec = new X509EncodedKeySpec(keyBytes);\n        KeyFactory keyFactory = KeyFactory.getInstance(\"RSA\");\n        PublicKey publicKey = keyFactory.generatePublic(keySpec);\n\n        // 2. 验证签名\n        Signature sig = Signature.getInstance(\"SHA256withRSA\");\n        sig.initVerify(publicKey);\n        sig.update(content.getBytes(StandardCharsets.UTF_8));\n\n        // 3. Base64解码签名值并验证\n        byte[] signatureBytes = Base64.getDecoder().decode(signature);\n        return sig.verify(signatureBytes);\n    }\n\n\n    public static String sortMapToString(Map<String, Object> map) {\n        List<String> keys = new ArrayList<>(map.keySet());\n        Collections.sort(keys);\n        StringBuilder sb = new StringBuilder();\n        for (int i = 0; i < keys.size(); i++) {\n\n            String key = keys.get(i);\n            Object value = map.get(key);\n            if (value == null || \"\".equals(value.toString())) {\n                continue; // 跳过空字段\n            }\n            if (sb.length() > 0) {\n                sb.append(\"&\");\n            }\n            sb.append(key).append(\"=\").append(value.toString());\n        }\n        return sb.toString();\n    }\n\n}\n```\n## 三、验签规则\n**Taropay 在回调商户时，会将请求方法,请求路径,请求时间戳以及业务参数，按照 Taropay 约定好的形式，获取到对应的签名字符串，并作为请求头参数X-API-SIGN传递给商户。商户需使用 Taropay 提供的公钥PublicKey对签名进行验证，确保数据的真实性和完整性。**\n\n### 验签步骤\n1. 准备验签的数据：HTTP_METHOD + \"|\" + HTTP_REQUEST_PATH + \"|\" + TIMESTAMP + \"|\" + PARAMS连接完成后，对数据进行验签\n   - HTTP_METHOD: 请求方法，如POST\n   - HTTP_REQUEST_PATH: 请求路径\n   - TIMESTAMP: 当前请求的时间戳，精确到毫秒,通过请求头进行获取\n   - PARAMS: 业务参数，按key的字典序排序后，拼接成 key=value&key=value 的形式\n2. 使用SHA256withRSA算法，使用Taropay提供的公钥PublicKey对准备好的数据进行签名，并对响应报文中的X-API-SIGN进行验签\n\n\n## 四、回调参数说明\n### 代收回调参数说明\n<span style=\"color: red;\">验签HTTP_REQUEST_PATH为空字符串</span>\n\n返回Header参数说明：\n| 参数名       | 类型    | 必填  | 描述                     |\n|--------------|---------|-------|--------------------------|\n| X-RESP-TIMESTAMP | string  | 是    | 请求时间戳，精确到毫秒       |\n| X-RESP-SIGN      | string  | 是    | 请求数据的签名             |\n\n返回响应参数说明：\n| 参数名       | 类型    | 必填  | 描述                     |\n|--------------|---------|-------|--------------------------|\n| mchId       | string  | 是    | 商户ID                   |\n| mchOrderNo  | string  | 是    | 商户订单号               |\n| transId     | string  | 是    | 平台订单号               |\n| amount      | number  | 是    | 订单金额                 |\n| status      | string  | 是    | 订单状态：0：成功、1：处理中、2：失败 |\n| successDate | string  | 是    | 订单付款时间              |\n\n\n### 代付回调参数说明\n<span style=\"color: red;\">验签HTTP_REQUEST_PATH为空字符串</span>\n\n返回Header参数说明：\n| 参数名       | 类型    | 必填  | 描述                     |\n|--------------|---------|-------|--------------------------|\n| X-RESP-TIMESTAMP | string  | 是    | 请求时间戳，精确到毫秒       |\n| X-RESP-SIGN      | string  | 是    | 请求数据的签名             |\n\n返回响应参数说明：\n| 参数名       | 类型    | 必填  | 描述                     |\n|--------------|---------|-------|--------------------------|\n| mchId       | string  | 是    | 商户ID                   |\n| mchOrderNo  | string  | 是    | 商户订单号               |\n| transId     | string  | 是    | 平台订单号               |\n| amount      | number  | 是    | 订单金额                 |\n| status      | string  | 是    | 订单状态：0：成功、1：处理中、2：失败 |\n| successDate | string  | 是    | 订单付款时间              |\n| message | string  | 是    | 失败描述              |\n\n## 五、附录\n### 代收ProductCode枚举\n| 值 | 产品 | 说明 |\n|----------|-----------|---------|\n|  DANA    | DANA电子钱包 |  不可用|\n|  OVO    | OVO电子钱包 | 不可用 |\n|  QRIS    | 扫码支付 |  |\n|  SHOPEEPAY    | SHOPEEPAY |不可用  |\n|  LINKAJA    | LINKAJA | 不可用 |\n\n\n### 代付ProductCode枚举\n| 值 | 产品 | 说明 |\n|----------|-----------|---------|\n|  DANA    | DANA电子钱包 |bankCode值：EWALLET_DANA  |\n|  OVO    | OVO电子钱包 |  bankCode值：EWALLET_OVO|\n|  SHOPEEPAY    | SHOPEEPAY | bankCode值：EWALLET_SHOPEEPAY |\n|  LINKAJA    | LINKAJA |  bankCode值：EWALLET_LINKAJA |\n|  BANK    | 银行 |  银行bankCode值：通过BankCode枚举银行编码获取 |\n\n### 代付BankCode枚举\n| 银行编码 | Type | 银行名称 |\n|----------|------|----------|\n| ANGLOMAS | Bank | Anglomas International Bank |\n| AMAR | Bank | Bank Amar Indonesia (formerly Anglomas International Bank) |\n| ABN_AMRO | Bank | Bank ABN Amro |\n| ACEH | Bank | BPD Aceh |\n| ACEH_UUS | Bank | BPD Aceh UUS (BPD Istimewa Aceh Syariah) |\n| ALADIN | Bank | Bank Aladin Syariah (formerly Bank Net Indonesia Syariah) |\n| BALI | Bank | Bank Pembangunan Daerah Bali |\n| BANGKOK | Bank | Bangkok Bank |\n| IBK | Bank | Bank IBK Indonesia (formerly Bank Agris) |\n| RAYA | Bank | Bank Raya Indonesia (formerly Bank Rakyat Indonesia Agroniaga) |\n| ANDARA | Bank | Bank Andara（Bank Oke Indonesia） |\n| ANZ | Bank | Bank ANZ Indonesia |\n| AGI | Bank | Bank Artha Graha International |\n| ALLO | Bank | Allo Bank Indonesia (formerly Bank Harda Internasional) |\n| JAGO | Bank | Bank Jago (formerly Bank Artos Indonesia) |\n| JAGO_SYR | Bank | Bank Jago Syariah |\n| KROM | Bank | Krom Bank Indonesia（Bank Bisnis Internasional） |\n| BANTEN | Bank | BPD Banten (formerly Bank Pundi Indonesia) |\n| BENGKULU | Bank | BPD Bengkulu |\n| BNC | Bank | Bank Neo Commerce(BNC) (formerly Bank Yudha Bhakti) |\n| BNP_PARIBAS | Bank | Bank BNP Paribas |\n| BUKOPIN | Bank | Bank Bukopin |\n| BUKOPIN_SYR | Bank | Bank Syariah Bukopin |\n| BUMI_ARTA | Bank | Bank Bumi Arta |\n| BCA | Bank | Bank Central Asia (BCA) |\n| BCA_SYR | Bank | Bank Central Asia (BCA) Syariah |\n| BCA_DIGITAL | Bank | Bank Royal Indonesia(Bank Digital BCA)(BluBCA) |\n| BNI | Bank | Bank Negara Indonesia (BNI) |\n| BNI_SYR | Bank | Bank BNI Syariah |\n| BOFA | Bank | Bank of America Merill-Lynch（now BofA Securities） |\n| BOC | Bank | Bank of China (BOC) |\n| BOI | Bank | Bank of India Indonesia(BOI) |\n| RBOS | Bank | Royal Bank of Scotland (RBS) |\n| BJB | Bank | Bank BJB (Bank Jawa Barat) |\n| BJB_SYR | Bank | Bank BJB Syariah (Bank Jabar Banten Syariah) |\n| BRI | Bank | Bank Rakyat Indonesia (BRI) |\n| BRI_SYR | Bank | Bank Syariah BRI |\n| BSI | Bank | Bank Syariah Indonesia |\n| BSG | Bank | Bank SulutGo(BANK BSG)(Formerly Bank sulawesi Utara dan Gorontalo) |\n| BTN | Bank | Bank Tabungan Negara (BTN) |\n| BTN_UUS | Bank | Bank Tabungan Negara (BTN) UUS |\n| BTPN | Bank | Bank Tabungan Pensiunan Nasional(BTPN) |\n| BTPN_SYR | Bank | Bank BTPN Syariah (formerly BTPN UUS and Bank Sahabat Purba Danarta) |\n| BPR_KS | Bank | BPR Karyajatnika Sadaya |\n| CAPITAL | Bank | Bank Capital Indonesia |\n| CNB | Bank | Centratama Nasional Bank |\n| CCB | Bank | China Construction Bank Indonesia (formerly Bank Antar Daerah and Bank Windu Kentjana International) |\n| CITIBANK | Bank | Citibank |\n| CTBC | Bank | Bank Chinatrust Indonesia（Bank CTBC Indonesia） |\n| CIMB | Bank | Bank CIMB Niaga |\n| CIMB_UUS | Bank | Bank CIMB Niaga UUS |\n| COMMONWEALTH | Bank | Bank Commonwealth |\n| DANAMON | Bank | Bank Danamon |\n| DANAMON_UUS | Bank | Bank Danamon UUS |\n| DBS | Bank | Bank DBS Indonesia |\n| DINAR_INDONESIA | Bank | Bank Dinar Indonesia |\n| DKI | Bank | Bank DKI |\n| DKI_UUS | Bank | Bank DKI UUS |\n| DEUTSCHE | Bank | Deutsche Bank |\n| EXIMBANK | Bank | Indonesia Eximbank (formerly Bank Ekspor Indonesia) |\n| JPMORGAN | Bank | JP Morgan Chase Bank |\n| PRIMA_MASTER | Bank | Prima Master Bank |\n| STANDARD_CHARTERED | Bank | Standard Chartered Bank |\n| SUPERBANK | Bank | Bank Fama International（now Super Bank Indonesia） |\n| GANESHA | Bank | Bank Ganesha |\n| HANA | Bank | Bank Hana |\n| HSBC | Bank | HSBC Indonesia (formerly Bank Ekonomi Raharja) |\n| HSBC_UUS | Bank | Hongkong and Shanghai Bank Corporation (HSBC) UUS |\n| ICBC | Bank | Bank ICBC Indonesia |\n| INA_PERDANA | Bank | Bank Ina Perdania |\n| INDEX_SELINDO | Bank | Bank Index Selindo(BANK HARMONI INTERNATIONAL) |\n| INTERIM | Bank | Bank Interim Indonesia(formerly Bank Rabobank International Indonesia) |\n| JASA_JAKARTA | Bank | Bank Jasa Jakarta |\n| JTRUST | Bank | Bank JTrust Indonesia (formerly Bank Mutiara) |\n| SEABANK | Bank | Bank Seabank Indonesia (formerly Bank Kesejahteraan Ekonomi) |\n| MANDIRI | Bank | Bank Mandiri |\n| MANDIRI_SYR | Bank | Bank Syariah Mandiri |\n| MANDIRI_TASPEN | Bank | Mandiri Taspen Pos (formerly Bank Sinar Harapan Bali) |\n| MASPION | Bank | Bank Maspion Indonesia |\n| MAYAPADA | Bank | Bank Mayapada International |\n| MAYBANK | Bank | Bank Maybank |\n| MAYBANK_SYR | Bank | Bank Maybank Syariah Indonesia (Bank Aladin Syariah) |\n| HIBANK | Bank | Bank Hibank Indonesia(Bank Mayora） |\n| MEGA | Bank | Bank Mega |\n| MEGA_SYR | Bank | Bank Syariah Mega |\n| MESTIKA | Bank | Bank Mestika Dharma |\n| MITRANIAGA | Bank | Bank MitraNiaga |\n| MIZUHO | Bank | Bank Mizuho Indonesia |\n| MNC_INTERNASIONAL | Bank | Bank MNC Internasional |\n| MUAMALAT | Bank | Bank Muamalat Indonesia |\n| MULTI_ARTA_SENTOSA | Bank | Bank Multi Arta Sentosa |\n| MUFG | Bank | Bank of Tokyo Mitsubishi UFJ（MUFG bank） |\n| NAGA | Bank | Bank Mitraniaga(NAGA) |\n| NOBU | Bank | Bank Nationalnobu |\n| NUSANTARA_PARAHYANGAN | Bank | Bank Nusantara Parahyangan |\n| OCBC | Bank | Bank OCBC NISP |\n| OCBC_UUS | Bank | Bank OCBC NISP UUS |\n| OKE | Bank | Bank Oke Indonesia (formerly Bank Andara) |\n| PANIN | Bank | Bank Panin |\n| PANIN_SYR | Bank | Bank Panin Syariah |\n| PERMATA | Bank | Bank Permata |\n| PERMATA_UUS | Bank | Bank Permata UUS |\n| PIKKO | Bank | Bank Pikko(Bank Century) |\n| QNB_INDONESIA | Bank | Bank QNB Indonesia (formerly Bank QNB Kesawan) |\n| RABOBANK | Bank | Bank Rabobank International Indonesia |\n| RESONA | Bank | Bank Resona Perdania |\n| BSS | Bank | Bank Sahabat Sampoerna |\n| SBI_INDONESIA | Bank | Bank SBI Indonesia |\n| SHINHAN | Bank | Bank Shinhan Indonesia (formerly Bank Metro Express) |\n| SINARMAS | Bank | Bank Sinarmas |\n| SINARMAS_UUS | Bank | Bank Sinarmas UUS |\n| SMBCI | Bank | Bank Sumitomo Mitsui Indonesia |\n| UOB | Bank | Bank UOB Indonesia |\n| VICTORIA_INTERNASIONAL | Bank | Bank Victoria Internasional |\n| VICTORIA_SYR | Bank | Bank Victoria Syariah |\n| WOORI_SAUDARA | Bank | Bank Woori Saudara Indonesia 1906 (formerly Bank Himpunan Saudara and Bank Woori Indonesia) |\n| WOORI | Bank | Bank Woori Indonesia |\n| DIY | Bank | BPD Daerah Istimewa Yogyakarta (DIY) |\n| DIY_UUS | Bank | BPD Daerah Istimewa Yogyakarta Syariah (DIY UUS) |\n| KEB | Bank | Bank KEB Indonesia（Korea Exchange Bank Danamon） |\n| JENIUS | Bank | Bank Jenius |\n| JAMBI | Bank | BPD Jambi |\n| JAMBI_UUS | Bank | BPD Jambi UUS |\n| JATENG | Bank | Bank Jateng（formerly BPD Jawa Tengah） |\n| JATENG_SYR | Bank | BPD Jawa Tengah UUS (Bank Jateng Syariah) |\n| JATIM | Bank | Bank Jatim (Ex BPD Jawa Timur) |\n| JATIM_SYR | Bank | BPD Jawa Timur UUS (Bank Jatim Syariah) |\n| KALBAR | Bank | BPD Kalimantan Barat(Bank Kalbar) |\n| KALBAR_UUS | Bank | BPD Kalimantan Barat UUS |\n| KALSE | Bank | BPD Kalimantan Selatan (Bank Kalsel) |\n| KALSE_UUS | Bank | BPD Kalimantan Selatan UUS |\n| KALTENG | Bank | BPD Kalimantan Tengah(Bank Kalteng) |\n| KALTIM | Bank | BPD Kalimantan Timur(Bank BPD Kaltim) |\n| KALTIM_UUS | Bank | BPD Kalimantan Timur UUS |\n| LAMPUNG | Bank | BPD Lampung |\n| MALUKU | Bank | BPD Maluku |\n| NTB | Bank | BPD Nusa Tenggara Barat(Bank NTB) |\n| NTB_UUS | Bank | BPD Nusa Tenggara Barat UUS |\n| NTT | Bank | BPD Nusa Tenggara Timur(Bank NTT) |\n| PAPUA | Bank | BPD Papua |\n| BRK | Bank | BPD Riau Kepri |\n| BRK_UUS | Bank | BPD Riau Kepri Syariah |\n| SULTENG | Bank | BPD Sulawesi Tengah(Bank Sulteng) |\n| SULTRA | Bank | BPD Sulawesi Tenggara(Bank Sultra) |\n| SULSELBAR | Bank | BPD Sulselbar |\n| SULSELBAR_UUS | Bank | BPD Sulselbar UUS |\n| SULUT | Bank | BPD Sulut |\n| NAGARI | Bank | BPD Sumatera Barat(Bank Nagari) |\n| NAGARI_UUS | Bank | BPD Sumatera Barat UUS(Bank Nagari Syariah) |\n| SUMSEL_BABEL | Bank | BPD Sumsel Babel(BPD Sumatera Selatan Babel) |\n| SUMSEL_BABEL_UUS | Bank | BPD Sumsel Babel UUS((BPD Sumatera Selatan Babel Syariah) |\n| SUMUT | Bank | BPD Sumut（BPD Sumatera Utara） |\n| SUMUT_UUS | Bank | BPD Sumut UUS |\n"
+    }
+  ],
+  "paths": {
+    "/payout/create": {
+      "post": {
+        "tags": [
+          "代付相关接口"
+        ],
+        "summary": "创建代付订单",
+        "operationId": "getOperatingNotice",
+        "x-code-samples": [
+          {
+            "lang": "curl",
+            "label": "cURL",
+            "source": "curl -X POST \"https://sandbox.zapxpay.com/payout/create\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"X-API-TIMESTAMP: 1703123456789\" \\\n  -H \"X-API-SIGN: your_signature_here\" \\\n  -d '{\n    \"accountName\": \"SANTOS\",\n    \"accountNo\": \"62852xxxxxxxx\",\n    \"mobile\": \"xxxxxx\",\n    \"accountEmail\": \"xxx@gmail.com\",\n    \"currency\": \"IDR\",\n    \"amount\": \"10000\",\n    \"mchOrderNo\": \"239029832938923\",\n    \"notifyUrl\": \"https://xxx.xxx.com\",\n    \"bankCode\": \"EWALLET_OVO\",\n    \"mchId\": \"1182047604490003\",\n    \"productCode\": \"OVO\"\n  }'\n"
+          },
+          {
+            "lang": "javascript",
+            "label": "JavaScript",
+            "source": "const response = await fetch('https://sandbox.zapxpay.com/payout/create', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'X-API-TIMESTAMP': '1703123456789',\n    'X-API-SIGN': 'your_signature_here'\n  },\n  body: JSON.stringify({\n    accountName: 'SANTOS',\n    accountNo: '62852xxxxxxxx',\n    mobile: 'xxxxxx',\n    accountEmail: 'xxx@gmail.com',\n    currency: 'IDR',\n    amount: '10000',\n    mchOrderNo: '239029832938923',\n    notifyUrl: 'https://xxx.xxx.com',\n    bankCode: 'EWALLET_OVO',\n    mchId: '1182047604490003',\n    productCode: 'OVO'\n  })\n});\nconst data = await response.json();\n"
+          },
+          {
+            "lang": "python",
+            "label": "Python",
+            "source": "import requests\nimport json\n\nurl = \"https://sandbox.zapxpay.com/payout/create\"\nheaders = {\n    \"Content-Type\": \"application/json\",\n    \"X-API-TIMESTAMP\": \"1703123456789\",\n    \"X-API-SIGN\": \"your_signature_here\"\n}\ndata = {\n    \"accountName\": \"SANTOS\",\n    \"accountNo\": \"62852xxxxxxxx\",\n    \"mobile\": \"xxxxxx\",\n    \"accountEmail\": \"xxx@gmail.com\",\n    \"currency\": \"IDR\",\n    \"amount\": \"10000\",\n    \"mchOrderNo\": \"239029832938923\",\n    \"notifyUrl\": \"https://xxx.xxx.com\",\n    \"bankCode\": \"EWALLET_OVO\",\n    \"mchId\": \"1182047604490003\",\n    \"productCode\": \"OVO\"\n}\n\nresponse = requests.post(url, headers=headers, data=json.dumps(data))\nresult = response.json()\n"
+          },
+          {
+            "lang": "java",
+            "label": "Java",
+            "source": "import java.net.http.*;\nimport java.net.URI;\n\nString json = \"{\\\"accountName\\\":\\\"SANTOS\\\",\\\"accountNo\\\":\\\"62852xxxxxxxx\\\",\\\"mobile\\\":\\\"xxxxxx\\\",\\\"accountEmail\\\":\\\"xxx@gmail.com\\\",\\\"currency\\\":\\\"IDR\\\",\\\"amount\\\":\\\"10000\\\",\\\"mchOrderNo\\\":\\\"239029832938923\\\",\\\"notifyUrl\\\":\\\"https://xxx.xxx.com\\\",\\\"bankCode\\\":\\\"EWALLET_OVO\\\",\\\"mchId\\\":\\\"1182047604490003\\\",\\\"productCode\\\":\\\"OVO\\\"}\";\n\nHttpRequest request = HttpRequest.newBuilder()\n    .uri(URI.create(\"https://sandbox.zapxpay.com/payout/create\"))\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"X-API-TIMESTAMP\", \"1703123456789\")\n    .header(\"X-API-SIGN\", \"your_signature_here\")\n    .POST(HttpRequest.BodyPublishers.ofString(json))\n    .build();\n\nHttpClient client = HttpClient.newHttpClient();\nHttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());\n"
+          },
+          {
+            "lang": "go",
+            "label": "Go",
+            "source": "package main\n\nimport (\n    \"bytes\"\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n    \"io\"\n)\n\ntype PayoutRequest struct {\n    AccountName  string `json:\"accountName\"`\n    AccountNo    string `json:\"accountNo\"`\n    Mobile       string `json:\"mobile\"`\n    AccountEmail string `json:\"accountEmail\"`\n    Currency     string `json:\"currency\"`\n    Amount       string `json:\"amount\"`\n    MchOrderNo   string `json:\"mchOrderNo\"`\n    NotifyUrl    string `json:\"notifyUrl\"`\n    BankCode     string `json:\"bankCode\"`\n    MchId        string `json:\"mchId\"`\n    ProductCode  string `json:\"productCode\"`\n}\n\nfunc main() {\n    url := \"https://sandbox.zapxpay.com/payout/create\"\n    \n    requestBody := PayoutRequest{\n        AccountName:  \"SANTOS\",\n        AccountNo:    \"62852xxxxxxxx\",\n        Mobile:       \"xxxxxx\",\n        AccountEmail: \"xxx@gmail.com\",\n        Currency:     \"IDR\",\n        Amount:       \"10000\",\n        MchOrderNo:   \"239029832938923\",\n        NotifyUrl:    \"https://xxx.xxx.com\",\n        BankCode:     \"EWALLET_OVO\",\n        MchId:        \"1182047604490003\",\n        ProductCode:  \"OVO\",\n    }\n    \n    jsonData, _ := json.Marshal(requestBody)\n    \n    req, _ := http.NewRequest(\"POST\", url, bytes.NewBuffer(jsonData))\n    req.Header.Set(\"Content-Type\", \"application/json\")\n    req.Header.Set(\"X-API-TIMESTAMP\", \"1703123456789\")\n    req.Header.Set(\"X-API-SIGN\", \"your_signature_here\")\n    \n    client := &http.Client{}\n    resp, _ := client.Do(req)\n    defer resp.Body.Close()\n    \n    body, _ := io.ReadAll(resp.Body)\n    fmt.Println(string(body))\n}\n"
+          },
+          {
+            "lang": "csharp",
+            "label": "C#",
+            "source": "using System;\nusing System.Net.Http;\nusing System.Text;\nusing System.Threading.Tasks;\nusing Newtonsoft.Json;\n\nclass Program\n{\n    static async Task Main(string[] args)\n    {\n        var client = new HttpClient();\n        var url = \"https://sandbox.zapxpay.com/payout/create\";\n        \n        var requestBody = new {\n            accountName = \"SANTOS\",\n            accountNo = \"62852xxxxxxxx\",\n            mobile = \"xxxxxx\",\n            accountEmail = \"xxx@gmail.com\",\n            currency = \"IDR\",\n            amount = \"10000\",\n            mchOrderNo = \"239029832938923\",\n            notifyUrl = \"https://xxx.xxx.com\",\n            bankCode = \"EWALLET_OVO\",\n            mchId = \"1182047604490003\",\n            productCode = \"OVO\"\n        };\n        \n        var json = JsonConvert.SerializeObject(requestBody);\n        var content = new StringContent(json, Encoding.UTF8, \"application/json\");\n        \n        client.DefaultRequestHeaders.Add(\"X-API-TIMESTAMP\", \"1703123456789\");\n        client.DefaultRequestHeaders.Add(\"X-API-SIGN\", \"your_signature_here\");\n        \n        var response = await client.PostAsync(url, content);\n        var responseString = await response.Content.ReadAsStringAsync();\n        \n        Console.WriteLine(responseString);\n    }\n}\n"
+          },
+          {
+            "lang": "ruby",
+            "label": "Ruby",
+            "source": "require 'net/http'\nrequire 'json'\nrequire 'uri'\n\nuri = URI('https://sandbox.zapxpay.com/payout/create')\n\nhttp = Net::HTTP.new(uri.host, uri.port)\nhttp.use_ssl = true\n\nrequest = Net::HTTP::Post.new(uri)\nrequest['Content-Type'] = 'application/json'\nrequest['X-API-TIMESTAMP'] = '1703123456789'\nrequest['X-API-SIGN'] = 'your_signature_here'\n\nrequest.body = {\n  accountName: 'SANTOS',\n  accountNo: '62852xxxxxxxx',\n  mobile: 'xxxxxx',\n  accountEmail: 'xxx@gmail.com',\n  currency: 'IDR',\n  amount: '10000',\n  mchOrderNo: '239029832938923',\n  notifyUrl: 'https://xxx.xxx.com',\n  bankCode: 'EWALLET_OVO',\n  mchId: '1182047604490003',\n  productCode: 'OVO'\n}.to_json\n\nresponse = http.request(request)\nputs response.body\n"
+          },
+          {
+            "lang": "php",
+            "label": "PHP",
+            "source": "<?php\n$url = 'https://sandbox.zapxpay.com/payout/create';\n$data = array(\n    'accountName' => 'SANTOS',\n    'accountNo' => '62852xxxxxxxx',\n    'mobile' => 'xxxxxx',\n    'accountEmail' => 'xxx@gmail.com',\n    'currency' => 'IDR',\n    'amount' => '10000',\n    'mchOrderNo' => '239029832938923',\n    'notifyUrl' => 'https://xxx.xxx.com',\n    'bankCode' => 'EWALLET_OVO',\n    'mchId' => '1182047604490003',\n    'productCode' => 'OVO'\n);\n\n$options = array(\n    'http' => array(\n        'header'  => \"Content-Type: application/json\\r\\n\" .\n                    \"X-API-TIMESTAMP: 1703123456789\\r\\n\" .\n                    \"X-API-SIGN: your_signature_here\\r\\n\",\n        'method'  => 'POST',\n        'content' => json_encode($data)\n    )\n);\n\n$context = stream_context_create($options);\n$result = file_get_contents($url, false, $context);\n$response = json_decode($result, true);\n\nprint_r($response);\n?>\n"
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-TIMESTAMP",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-API-SIGN",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/payoutRequestParameter"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutCreateResponse"
+                },
+                "examples": {
+                  "success_response": {
+                    "summary": "成功响应示例",
+                    "value": {
+                      "code": 0,
+                      "message": "SUCCESS",
+                      "data": {
+                        "transId": "T20231201123456789",
+                        "mchOrderNo": "PAY20231201123456",
+                        "amount": "100000",
+                        "mchId": "1182047604490003"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalid_params": {
+                    "summary": "参数错误示例",
+                    "value": {
+                      "code": -1,
+                      "message": "参数验证失败：accountName不能为空",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payout/getOrderInfo": {
+      "post": {
+        "tags": [
+          "代付相关接口"
+        ],
+        "summary": "查询代付订单",
+        "operationId": "getRemitOrder",
+        "x-code-samples": [
+          {
+            "lang": "curl",
+            "label": "cURL",
+            "source": "curl -X POST \"https://sandbox.zapxpay.com/payout/getOrderInfo\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"X-API-TIMESTAMP: 1703123456789\" \\\n  -H \"X-API-SIGN: your_signature_here\" \\\n  -d '{\n    \"mchOrderNo\": \"2324234234\",\n    \"mchId\": \"xxxx\"\n  }'\n"
+          },
+          {
+            "lang": "javascript",
+            "label": "JavaScript",
+            "source": "const response = await fetch('https://sandbox.zapxpay.com/payout/getOrderInfo', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'X-API-TIMESTAMP': '1703123456789',\n    'X-API-SIGN': 'your_signature_here'\n  },\n  body: JSON.stringify({\n    mchOrderNo: '2324234234',\n    mchId: 'xxxx'\n  })\n});\nconst data = await response.json();\n"
+          },
+          {
+            "lang": "python",
+            "label": "Python",
+            "source": "import requests\nimport json\n\nurl = \"https://sandbox.zapxpay.com/payout/getOrderInfo\"\nheaders = {\n    \"Content-Type\": \"application/json\",\n    \"X-API-TIMESTAMP\": \"1703123456789\",\n    \"X-API-SIGN\": \"your_signature_here\"\n}\ndata = {\n    \"mchOrderNo\": \"2324234234\",\n    \"mchId\": \"xxxx\"\n}\n\nresponse = requests.post(url, headers=headers, data=json.dumps(data))\nresult = response.json()\n"
+          },
+          {
+            "lang": "java",
+            "label": "Java",
+            "source": "import java.net.http.*;\nimport java.net.URI;\n\nString json = \"{\\\"mchOrderNo\\\":\\\"2324234234\\\",\\\"mchId\\\":\\\"xxxx\\\"}\";\n\nHttpRequest request = HttpRequest.newBuilder()\n    .uri(URI.create(\"https://sandbox.zapxpay.com/payout/getOrderInfo\"))\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"X-API-TIMESTAMP\", \"1703123456789\")\n    .header(\"X-API-SIGN\", \"your_signature_here\")\n    .POST(HttpRequest.BodyPublishers.ofString(json))\n    .build();\n\nHttpClient client = HttpClient.newHttpClient();\nHttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());\n"
+          },
+          {
+            "lang": "go",
+            "label": "Go",
+            "source": "package main\n\nimport (\n    \"bytes\"\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n    \"io\"\n)\n\ntype RequestBody struct {\n    MchOrderNo string `json:\"mchOrderNo\"`\n    MchId      string `json:\"mchId\"`\n}\n\nfunc main() {\n    url := \"https://sandbox.zapxpay.com/payout/getOrderInfo\"\n    \n    requestBody := RequestBody{\n        MchOrderNo: \"2324234234\",\n        MchId:      \"xxxx\",\n    }\n    \n    jsonData, _ := json.Marshal(requestBody)\n    \n    req, _ := http.NewRequest(\"POST\", url, bytes.NewBuffer(jsonData))\n    req.Header.Set(\"Content-Type\", \"application/json\")\n    req.Header.Set(\"X-API-TIMESTAMP\", \"1703123456789\")\n    req.Header.Set(\"X-API-SIGN\", \"your_signature_here\")\n    \n    client := &http.Client{}\n    resp, _ := client.Do(req)\n    defer resp.Body.Close()\n    \n    body, _ := io.ReadAll(resp.Body)\n    fmt.Println(string(body))\n}\n"
+          },
+          {
+            "lang": "csharp",
+            "label": "C#",
+            "source": "using System;\nusing System.Net.Http;\nusing System.Text;\nusing System.Threading.Tasks;\nusing Newtonsoft.Json;\n\nclass Program\n{\n    static async Task Main(string[] args)\n    {\n        var client = new HttpClient();\n        var url = \"https://sandbox.zapxpay.com/payout/getOrderInfo\";\n        \n        var requestBody = new {\n            mchOrderNo = \"2324234234\",\n            mchId = \"xxxx\"\n        };\n        \n        var json = JsonConvert.SerializeObject(requestBody);\n        var content = new StringContent(json, Encoding.UTF8, \"application/json\");\n        \n        client.DefaultRequestHeaders.Add(\"X-API-TIMESTAMP\", \"1703123456789\");\n        client.DefaultRequestHeaders.Add(\"X-API-SIGN\", \"your_signature_here\");\n        \n        var response = await client.PostAsync(url, content);\n        var responseString = await response.Content.ReadAsStringAsync();\n        \n        Console.WriteLine(responseString);\n    }\n}\n"
+          },
+          {
+            "lang": "ruby",
+            "label": "Ruby",
+            "source": "require 'net/http'\nrequire 'json'\nrequire 'uri'\n\nuri = URI('https://sandbox.zapxpay.com/payout/getOrderInfo')\n\nhttp = Net::HTTP.new(uri.host, uri.port)\nhttp.use_ssl = true\n\nrequest = Net::HTTP::Post.new(uri)\nrequest['Content-Type'] = 'application/json'\nrequest['X-API-TIMESTAMP'] = '1703123456789'\nrequest['X-API-SIGN'] = 'your_signature_here'\n\nrequest.body = {\n  mchOrderNo: '2324234234',\n  mchId: 'xxxx'\n}.to_json\n\nresponse = http.request(request)\nputs response.body\n"
+          },
+          {
+            "lang": "php",
+            "label": "PHP",
+            "source": "<?php\n$url = 'https://sandbox.zapxpay.com/payout/getOrderInfo';\n$data = array(\n    'mchOrderNo' => '2324234234',\n    'mchId' => 'xxxx'\n);\n\n$options = array(\n    'http' => array(\n        'header'  => \"Content-Type: application/json\\r\\n\" .\n                    \"X-API-TIMESTAMP: 1703123456789\\r\\n\" .\n                    \"X-API-SIGN: your_signature_here\\r\\n\",\n        'method'  => 'POST',\n        'content' => json_encode($data)\n    )\n);\n\n$context = stream_context_create($options);\n$result = file_get_contents($url, false, $context);\n$response = json_decode($result, true);\n\nprint_r($response);\n?>\n"
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-TIMESTAMP",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-API-SIGN",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/requestQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "查询成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryCreateResponse"
+                },
+                "examples": {
+                  "success_response": {
+                    "summary": "成功响应示例",
+                    "value": {
+                      "code": 0,
+                      "message": "SUCCESS",
+                      "data": {
+                        "transId": "T20231201123456789",
+                        "mchOrderNo": "PAY20231201123456",
+                        "amount": "100000",
+                        "mchId": "1182047604490003",
+                        "status": "0"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalid_params": {
+                    "summary": "参数错误示例",
+                    "value": {
+                      "code": -1,
+                      "message": "参数错误",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payin/create": {
+      "post": {
+        "tags": [
+          "代收相关接口"
+        ],
+        "summary": "创建代收订单",
+        "operationId": "getCollect",
+        "x-code-samples": [
+          {
+            "lang": "curl",
+            "label": "cURL",
+            "source": "curl -X POST \"https://sandbox.zapxpay.com/payin/create\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"X-API-TIMESTAMP: 1703123456789\" \\\n  -H \"X-API-SIGN: your_signature_here\" \\\n  -d '{\n    \"userName\": \"SANTOS\",\n    \"email\": \"SANTOS@gamil.com\",\n    \"mobile\": \"0852xxxxxxxxxxx\",\n    \"amount\": \"10000\",\n    \"mchOrderNo\": \"238923923\",\n    \"notifyUrl\": \"https://xxxx.xxxx.com\",\n    \"mchId\": \"xxxxxxxx\",\n    \"productCode\": \"2\",\n    \"currency\": \"IDR\"\n  }'\n"
+          },
+          {
+            "lang": "javascript",
+            "label": "JavaScript",
+            "source": "const response = await fetch('https://sandbox.zapxpay.com/payin/create', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'X-API-TIMESTAMP': '1703123456789',\n    'X-API-SIGN': 'your_signature_here'\n  },\n  body: JSON.stringify({\n    userName: 'SANTOS',\n    email: 'SANTOS@gamil.com',\n    mobile: '0852xxxxxxxxxxx',\n    amount: '10000',\n    mchOrderNo: '238923923',\n    notifyUrl: 'https://xxxx.xxxx.com',\n    mchId: 'xxxxxxxx',\n    productCode: '2',\n    currency: 'IDR'\n  })\n});\nconst data = await response.json();\n"
+          },
+          {
+            "lang": "python",
+            "label": "Python",
+            "source": "import requests\nimport json\n\nurl = \"https://sandbox.zapxpay.com/payin/create\"\nheaders = {\n    \"Content-Type\": \"application/json\",\n    \"X-API-TIMESTAMP\": \"1703123456789\",\n    \"X-API-SIGN\": \"your_signature_here\"\n}\ndata = {\n    \"userName\": \"SANTOS\",\n    \"email\": \"SANTOS@gamil.com\",\n    \"mobile\": \"0852xxxxxxxxxxx\",\n    \"amount\": \"10000\",\n    \"mchOrderNo\": \"238923923\",\n    \"notifyUrl\": \"https://xxxx.xxxx.com\",\n    \"mchId\": \"xxxxxxxx\",\n    \"productCode\": \"2\",\n    \"currency\": \"IDR\"\n}\n\nresponse = requests.post(url, headers=headers, data=json.dumps(data))\nresult = response.json()\n"
+          },
+          {
+            "lang": "java",
+            "label": "Java",
+            "source": "import java.net.http.*;\nimport java.net.URI;\n\nString json = \"{\\\"userName\\\":\\\"SANTOS\\\",\\\"email\\\":\\\"SANTOS@gamil.com\\\",\\\"mobile\\\":\\\"0852xxxxxxxxxxx\\\",\\\"amount\\\":\\\"10000\\\",\\\"mchOrderNo\\\":\\\"238923923\\\",\\\"notifyUrl\\\":\\\"https://xxxx.xxxx.com\\\",\\\"mchId\\\":\\\"xxxxxxxx\\\",\\\"productCode\\\":\\\"2\\\",\\\"currency\\\":\\\"IDR\\\"}\";\n\nHttpRequest request = HttpRequest.newBuilder()\n    .uri(URI.create(\"https://sandbox.zapxpay.com/payin/create\"))\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"X-API-TIMESTAMP\", \"1703123456789\")\n    .header(\"X-API-SIGN\", \"your_signature_here\")\n    .POST(HttpRequest.BodyPublishers.ofString(json))\n    .build();\n\nHttpClient client = HttpClient.newHttpClient();\nHttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());\n"
+          },
+          {
+            "lang": "go",
+            "label": "Go",
+            "source": "package main\n\nimport (\n    \"bytes\"\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n    \"io\"\n)\n\ntype PayinRequest struct {\n    UserName    string `json:\"userName\"`\n    Email       string `json:\"email\"`\n    Mobile      string `json:\"mobile\"`\n    Amount      string `json:\"amount\"`\n    MchOrderNo  string `json:\"mchOrderNo\"`\n    NotifyUrl   string `json:\"notifyUrl\"`\n    MchId       string `json:\"mchId\"`\n    ProductCode string `json:\"productCode\"`\n    Currency    string `json:\"currency\"`\n}\n\nfunc main() {\n    url := \"https://sandbox.zapxpay.com/payin/create\"\n    \n    requestBody := PayinRequest{\n        UserName:    \"SANTOS\",\n        Email:       \"SANTOS@gamil.com\",\n        Mobile:      \"62852xxxxxxxxxxx\",\n        Amount:      \"10000\",\n        MchOrderNo:  \"238923923\",\n        NotifyUrl:   \"https://xxxx.xxxx.com\",\n        MchId:       \"xxxxxxxx\",\n        ProductCode: \"2\",\n        Currency:    \"IDR\",\n    }\n    \n    jsonData, _ := json.Marshal(requestBody)\n    \n    req, _ := http.NewRequest(\"POST\", url, bytes.NewBuffer(jsonData))\n    req.Header.Set(\"Content-Type\", \"application/json\")\n    req.Header.Set(\"X-API-TIMESTAMP\", \"1703123456789\")\n    req.Header.Set(\"X-API-SIGN\", \"your_signature_here\")\n    \n    client := &http.Client{}\n    resp, _ := client.Do(req)\n    defer resp.Body.Close()\n    \n    body, _ := io.ReadAll(resp.Body)\n    fmt.Println(string(body))\n}\n"
+          },
+          {
+            "lang": "csharp",
+            "label": "C#",
+            "source": "using System;\nusing System.Net.Http;\nusing System.Text;\nusing System.Threading.Tasks;\nusing Newtonsoft.Json;\n\nclass Program\n{\n    static async Task Main(string[] args)\n    {\n        var client = new HttpClient();\n        var url = \"https://sandbox.zapxpay.com/payin/create\";\n        \n        var requestBody = new {\n            userName = \"SANTOS\",\n            email = \"SANTOS@gamil.com\",\n            mobile = \"62852xxxxxxxxxxx\",\n            amount = \"10000\",\n            mchOrderNo = \"238923923\",\n            notifyUrl = \"https://xxxx.xxxx.com\",\n            mchId = \"xxxxxxxx\",\n            productCode = \"2\",\n            currency = \"IDR\"\n        };\n        \n        var json = JsonConvert.SerializeObject(requestBody);\n        var content = new StringContent(json, Encoding.UTF8, \"application/json\");\n        \n        client.DefaultRequestHeaders.Add(\"X-API-TIMESTAMP\", \"1703123456789\");\n        client.DefaultRequestHeaders.Add(\"X-API-SIGN\", \"your_signature_here\");\n        \n        var response = await client.PostAsync(url, content);\n        var responseString = await response.Content.ReadAsStringAsync();\n        \n        Console.WriteLine(responseString);\n    }\n}\n"
+          },
+          {
+            "lang": "ruby",
+            "label": "Ruby",
+            "source": "require 'net/http'\nrequire 'json'\nrequire 'uri'\n\nuri = URI('https://sandbox.zapxpay.com/payin/create')\n\nhttp = Net::HTTP.new(uri.host, uri.port)\nhttp.use_ssl = true\n\nrequest = Net::HTTP::Post.new(uri)\nrequest['Content-Type'] = 'application/json'\nrequest['X-API-TIMESTAMP'] = '1703123456789'\nrequest['X-API-SIGN'] = 'your_signature_here'\n\nrequest.body = {\n  userName: 'SANTOS',\n  email: 'SANTOS@gamil.com',\n  mobile: '62852xxxxxxxxxxx',\n  amount: '10000',\n  mchOrderNo: '238923923',\n  notifyUrl: 'https://xxxx.xxxx.com',\n  mchId: 'xxxxxxxx',\n  productCode: '2',\n  currency: 'IDR'\n}.to_json\n\nresponse = http.request(request)\nputs response.body\n"
+          },
+          {
+            "lang": "php",
+            "label": "PHP",
+            "source": "<?php\n$url = 'https://sandbox.zapxpay.com/payin/create';\n$data = array(\n    'userName' => 'SANTOS',\n    'email' => 'SANTOS@gamil.com',\n    'mobile' => '62852xxxxxxxxxxx',\n    'amount' => '10000',\n    'mchOrderNo' => '238923923',\n    'notifyUrl' => 'https://xxxx.xxxx.com',\n    'mchId' => 'xxxxxxxx',\n    'productCode' => '2',\n    'currency' => 'IDR'\n);\n\n$options = array(\n    'http' => array(\n        'header'  => \"Content-Type: application/json\\r\\n\" .\n                    \"X-API-TIMESTAMP: 1703123456789\\r\\n\" .\n                    \"X-API-SIGN: your_signature_here\\r\\n\",\n        'method'  => 'POST',\n        'content' => json_encode($data)\n    )\n);\n\n$context = stream_context_create($options);\n$result = file_get_contents($url, false, $context);\n$response = json_decode($result, true);\n\nprint_r($response);\n?>\n"
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-TIMESTAMP",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-API-SIGN",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/payinRequestParameter"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayinCreateResponse"
+                },
+                "examples": {
+                  "success_response": {
+                    "summary": "成功响应示例",
+                    "value": {
+                      "code": 0,
+                      "message": "SUCCESS",
+                      "data": {
+                        "transId": "T20231201123456789",
+                        "mchOrderNo": "PAY20231201123456",
+                        "amount": "100000",
+                        "mchId": "1182047604490003",
+                        "payUrl": "https://payment.example.com/123456",
+                        "payCode": "qrcode"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalid_params": {
+                    "summary": "参数错误示例",
+                    "value": {
+                      "code": -1,
+                      "message": "参数验证失败：xxxx",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payin/getOrderInfo": {
+      "post": {
+        "tags": [
+          "代收相关接口"
+        ],
+        "summary": "查询代收订单",
+        "operationId": "queryCollectOrder",
+        "x-code-samples": [
+          {
+            "lang": "curl",
+            "label": "cURL",
+            "source": "curl -X POST \"https://sandbox.zapxpay.com/payin/getOrderInfo\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"X-API-TIMESTAMP: 1703123456789\" \\\n  -H \"X-API-SIGN: your_signature_here\" \\\n  -d '{\n    \"mchOrderNo\": \"2324234234\",\n    \"mchId\": \"xxxx\"\n  }'\n"
+          },
+          {
+            "lang": "javascript",
+            "label": "JavaScript",
+            "source": "const response = await fetch('https://sandbox.zapxpay.com/payin/getOrderInfo', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'X-API-TIMESTAMP': '1703123456789',\n    'X-API-SIGN': 'your_signature_here'\n  },\n  body: JSON.stringify({\n    mchOrderNo: '2324234234',\n    mchId: 'xxxx'\n  })\n});\nconst data = await response.json();\n"
+          },
+          {
+            "lang": "python",
+            "label": "Python",
+            "source": "import requests\nimport json\n\nurl = \"https://sandbox.zapxpay.com/payin/getOrderInfo\"\nheaders = {\n    \"Content-Type\": \"application/json\",\n    \"X-API-TIMESTAMP\": \"1703123456789\",\n    \"X-API-SIGN\": \"your_signature_here\"\n}\ndata = {\n    \"mchOrderNo\": \"2324234234\",\n    \"mchId\": \"xxxx\"\n}\n\nresponse = requests.post(url, headers=headers, data=json.dumps(data))\nresult = response.json()\n"
+          },
+          {
+            "lang": "java",
+            "label": "Java",
+            "source": "import java.net.http.*;\nimport java.net.URI;\n\nString json = \"{\\\"mchOrderNo\\\":\\\"2324234234\\\",\\\"mchId\\\":\\\"xxxx\\\"}\";\n\nHttpRequest request = HttpRequest.newBuilder()\n    .uri(URI.create(\"https://sandbox.zapxpay.com/payin/getOrderInfo\"))\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"X-API-TIMESTAMP\", \"1703123456789\")\n    .header(\"X-API-SIGN\", \"your_signature_here\")\n    .POST(HttpRequest.BodyPublishers.ofString(json))\n    .build();\n\nHttpClient client = HttpClient.newHttpClient();\nHttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());\n"
+          },
+          {
+            "lang": "go",
+            "label": "Go",
+            "source": "package main\n\nimport (\n    \"bytes\"\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n    \"io\"\n)\n\ntype RequestBody struct {\n    MchOrderNo string `json:\"mchOrderNo\"`\n    MchId      string `json:\"mchId\"`\n}\n\nfunc main() {\n    url := \"https://sandbox.zapxpay.com/payin/getOrderInfo\"\n    \n    requestBody := RequestBody{\n        MchOrderNo: \"2324234234\",\n        MchId:      \"xxxx\",\n    }\n    \n    jsonData, _ := json.Marshal(requestBody)\n    \n    req, _ := http.NewRequest(\"POST\", url, bytes.NewBuffer(jsonData))\n    req.Header.Set(\"Content-Type\", \"application/json\")\n    req.Header.Set(\"X-API-TIMESTAMP\", \"1703123456789\")\n    req.Header.Set(\"X-API-SIGN\", \"your_signature_here\")\n    \n    client := &http.Client{}\n    resp, _ := client.Do(req)\n    defer resp.Body.Close()\n    \n    body, _ := io.ReadAll(resp.Body)\n    fmt.Println(string(body))\n}\n"
+          },
+          {
+            "lang": "csharp",
+            "label": "C#",
+            "source": "using System;\nusing System.Net.Http;\nusing System.Text;\nusing System.Threading.Tasks;\nusing Newtonsoft.Json;\n\nclass Program\n{\n    static async Task Main(string[] args)\n    {\n        var client = new HttpClient();\n        var url = \"https://sandbox.zapxpay.com/payin/getOrderInfo\";\n        \n        var requestBody = new {\n            mchOrderNo = \"2324234234\",\n            mchId = \"xxxx\"\n        };\n        \n        var json = JsonConvert.SerializeObject(requestBody);\n        var content = new StringContent(json, Encoding.UTF8, \"application/json\");\n        \n        client.DefaultRequestHeaders.Add(\"X-API-TIMESTAMP\", \"1703123456789\");\n        client.DefaultRequestHeaders.Add(\"X-API-SIGN\", \"your_signature_here\");\n        \n        var response = await client.PostAsync(url, content);\n        var responseString = await response.Content.ReadAsStringAsync();\n        \n        Console.WriteLine(responseString);\n    }\n}\n"
+          },
+          {
+            "lang": "ruby",
+            "label": "Ruby",
+            "source": "require 'net/http'\nrequire 'json'\nrequire 'uri'\n\nuri = URI('https://sandbox.zapxpay.com/payin/getOrderInfo')\n\nhttp = Net::HTTP.new(uri.host, uri.port)\nhttp.use_ssl = true\n\nrequest = Net::HTTP::Post.new(uri)\nrequest['Content-Type'] = 'application/json'\nrequest['X-API-TIMESTAMP'] = '1703123456789'\nrequest['X-API-SIGN'] = 'your_signature_here'\n\nrequest.body = {\n  mchOrderNo: '2324234234',\n  mchId: 'xxxx'\n}.to_json\n\nresponse = http.request(request)\nputs response.body\n"
+          },
+          {
+            "lang": "php",
+            "label": "PHP",
+            "source": "<?php\n$url = 'https://sandbox.zapxpay.com/payin/getOrderInfo';\n$data = array(\n    'mchOrderNo' => '2324234234',\n    'mchId' => 'xxxx'\n);\n\n$options = array(\n    'http' => array(\n        'header'  => \"Content-Type: application/json\\r\\n\" .\n                    \"X-API-TIMESTAMP: 1703123456789\\r\\n\" .\n                    \"X-API-SIGN: your_signature_here\\r\\n\",\n        'method'  => 'POST',\n        'content' => json_encode($data)\n    )\n);\n\n$context = stream_context_create($options);\n$result = file_get_contents($url, false, $context);\n$response = json_decode($result, true);\n\nprint_r($response);\n?>\n"
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-TIMESTAMP",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-API-SIGN",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/requestQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "查询成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryCreateResponse"
+                },
+                "examples": {
+                  "success_response": {
+                    "summary": "成功响应示例",
+                    "value": {
+                      "code": 0,
+                      "message": "SUCCESS",
+                      "data": {
+                        "transId": "T20231201123456789",
+                        "mchOrderNo": "PAY20231201123456",
+                        "amount": "100000",
+                        "mchId": "1182047604490003",
+                        "status": "0"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalid_params": {
+                    "summary": "参数错误示例",
+                    "value": {
+                      "code": -1,
+                      "message": "参数错误",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/balanceInfo": {
+      "post": {
+        "tags": [
+          "账户相关接口"
+        ],
+        "summary": "获取余额信息",
+        "operationId": "getOperatingNotice_1",
+        "x-code-samples": [
+          {
+            "lang": "curl",
+            "label": "cURL",
+            "source": "curl -X POST \"https://sandbox.zapxpay.com/balanceInfo\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"X-API-TIMESTAMP: 1703123456789\" \\\n  -H \"X-API-SIGN: your_signature_here\" \\\n  -d '{\n    \"mchId\": \"xxxx\"\n  }'\n"
+          },
+          {
+            "lang": "javascript",
+            "label": "JavaScript",
+            "source": "const response = await fetch('https://sandbox.zapxpay.com/balanceInfo', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'X-API-TIMESTAMP': '1703123456789',\n    'X-API-SIGN': 'your_signature_here'\n  },\n  body: JSON.stringify({\n    mchId: 'xxxx'\n  })\n});\nconst data = await response.json();\n"
+          },
+          {
+            "lang": "python",
+            "label": "Python",
+            "source": "import requests\nimport json\n\nurl = \"https://sandbox.zapxpay.com/balanceInfo\"\nheaders = {\n    \"Content-Type\": \"application/json\",\n    \"X-API-TIMESTAMP\": \"1703123456789\",\n    \"X-API-SIGN\": \"your_signature_here\"\n}\ndata = {\n    \"mchId\": \"xxxx\"\n}\n\nresponse = requests.post(url, headers=headers, data=json.dumps(data))\nresult = response.json()\n"
+          },
+          {
+            "lang": "java",
+            "label": "Java",
+            "source": "import java.net.http.*;\nimport java.net.URI;\n\nString json = \"{\\\"mchId\\\":\\\"xxxx\\\"}\";\n\nHttpRequest request = HttpRequest.newBuilder()\n    .uri(URI.create(\"https://sandbox.zapxpay.com/balanceInfo\"))\n    .header(\"Content-Type\", \"application/json\")\n    .header(\"X-API-TIMESTAMP\", \"1703123456789\")\n    .header(\"X-API-SIGN\", \"your_signature_here\")\n    .POST(HttpRequest.BodyPublishers.ofString(json))\n    .build();\n\nHttpClient client = HttpClient.newHttpClient();\nHttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());\n"
+          },
+          {
+            "lang": "go",
+            "label": "Go",
+            "source": "package main\n\nimport (\n    \"bytes\"\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n    \"io\"\n)\n\ntype BalanceRequest struct {\n    MchId string `json:\"mchId\"`\n}\n\nfunc main() {\n    url := \"https://sandbox.zapxpay.com/balanceInfo\"\n    \n    requestBody := BalanceRequest{\n        MchId: \"xxxx\",\n    }\n    \n    jsonData, _ := json.Marshal(requestBody)\n    \n    req, _ := http.NewRequest(\"POST\", url, bytes.NewBuffer(jsonData))\n    req.Header.Set(\"Content-Type\", \"application/json\")\n    req.Header.Set(\"X-API-TIMESTAMP\", \"1703123456789\")\n    req.Header.Set(\"X-API-SIGN\", \"your_signature_here\")\n    \n    client := &http.Client{}\n    resp, _ := client.Do(req)\n    defer resp.Body.Close()\n    \n    body, _ := io.ReadAll(resp.Body)\n    fmt.Println(string(body))\n}\n"
+          },
+          {
+            "lang": "csharp",
+            "label": "C#",
+            "source": "using System;\nusing System.Net.Http;\nusing System.Text;\nusing System.Threading.Tasks;\nusing Newtonsoft.Json;\n\nclass Program\n{\n    static async Task Main(string[] args)\n    {\n        var client = new HttpClient();\n        var url = \"https://sandbox.zapxpay.com/balanceInfo\";\n        \n        var requestBody = new {\n            mchId = \"xxxx\"\n        };\n        \n        var json = JsonConvert.SerializeObject(requestBody);\n        var content = new StringContent(json, Encoding.UTF8, \"application/json\");\n        \n        client.DefaultRequestHeaders.Add(\"X-API-TIMESTAMP\", \"1703123456789\");\n        client.DefaultRequestHeaders.Add(\"X-API-SIGN\", \"your_signature_here\");\n        \n        var response = await client.PostAsync(url, content);\n        var responseString = await response.Content.ReadAsStringAsync();\n        \n        Console.WriteLine(responseString);\n    }\n}\n"
+          },
+          {
+            "lang": "ruby",
+            "label": "Ruby",
+            "source": "require 'net/http'\nrequire 'json'\nrequire 'uri'\n\nuri = URI('https://sandbox.zapxpay.com/balanceInfo')\n\nhttp = Net::HTTP.new(uri.host, uri.port)\nhttp.use_ssl = true\n\nrequest = Net::HTTP::Post.new(uri)\nrequest['Content-Type'] = 'application/json'\nrequest['X-API-TIMESTAMP'] = '1703123456789'\nrequest['X-API-SIGN'] = 'your_signature_here'\n\nrequest.body = {\n  mchId: 'xxxx'\n}.to_json\n\nresponse = http.request(request)\nputs response.body\n"
+          },
+          {
+            "lang": "php",
+            "label": "PHP",
+            "source": "<?php\n$url = 'https://sandbox.zapxpay.com/balanceInfo';\n$data = array(\n    'mchId' => 'xxxx'\n);\n\n$options = array(\n    'http' => array(\n        'header'  => \"Content-Type: application/json\\r\\n\" .\n                    \"X-API-TIMESTAMP: 1703123456789\\r\\n\" .\n                    \"X-API-SIGN: your_signature_here\\r\\n\",\n        'method'  => 'POST',\n        'content' => json_encode($data)\n    )\n);\n\n$context = stream_context_create($options);\n$result = file_get_contents($url, false, $context);\n$response = json_decode($result, true);\n\nprint_r($response);\n?>\n"
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-API-TIMESTAMP",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-API-SIGN",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/queryBalanceReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "查询成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceResponse"
+                },
+                "examples": {
+                  "success_response": {
+                    "summary": "成功响应示例",
+                    "value": {
+                      "code": 0,
+                      "message": "SUCCESS",
+                      "data": {
+                        "frozenAmount": 23232,
+                        "availableAmount": 100000.23,
+                        "mchId": "1182047604490003"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalid_params": {
+                    "summary": "参数错误示例",
+                    "value": {
+                      "code": -1,
+                      "message": "请求参数错误",
+                      "data": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "requestQuery": {
+        "required": [
+          "mchId",
+          "mchOrderNo"
+        ],
+        "type": "object",
+        "properties": {
+          "mchOrderNo": {
+            "type": "string",
+            "description": "商户订单号",
+            "example": "2324234234"
+          },
+          "transId": {
+            "type": "string",
+            "description": "平台订单号",
+            "example": "2324234234"
+          },
+          "mchId": {
+            "type": "string",
+            "description": "商户ID",
+            "example": "xxxx"
+          }
+        },
+        "description": "查询订单参数"
+      },
+      "payoutRequestParameter": {
+        "required": [
+          "mchId",
+          "mchOrderNo",
+          "productCode",
+          "bankCode",
+          "accountName",
+          "accountNo",
+          "mobile",
+          "accountEmail",
+          "amount",
+          "currency",
+          "notifyUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "accountName": {
+            "type": "string",
+            "description": "收款人姓名",
+            "example": "SANTOS"
+          },
+          "accountNo": {
+            "type": "string",
+            "description": "收款账户",
+            "example": "xxxxxxxxxxxx"
+          },
+          "mobile": {
+            "type": "string",
+            "description": "手机号,**以628开头,注意：电子钱包代付、OVO收款时，手机号必须真实**",
+            "example": "xxxxxx"
+          },
+          "accountEmail": {
+            "type": "string",
+            "description": "收款人邮箱",
+            "example": "xxx@gmail.com"
+          },
+          "currency": {
+            "type": "string",
+            "description": "currency",
+            "example": "IDR"
+          },
+          "amount": {
+            "type": "string",
+            "description": "付款金额",
+            "example": "10000"
+          },
+          "mchOrderNo": {
+            "type": "string",
+            "description": "商户订单号",
+            "example": "239029832938923"
+          },
+          "notifyUrl": {
+            "type": "string",
+            "description": "商户回调URL",
+            "example": "https://xxx.xxx.com"
+          },
+          "bankCode": {
+            "type": "string",
+            "description": "银行代码",
+            "enum": [
+              "EWALLET_DANA",
+              "EWALLET_OVO",
+              "EWALLET_SHOPEEPAY",
+              "EWALLET_LINKAJA",
+              "BANK_BCA",
+              "BANK_BNI",
+              "BANK_BRI",
+              "BANK_MANDIRI",
+              "BANK_CIMB",
+              "BANK_DANAMON",
+              "BANK_OCBC_NISP",
+              "BANK_PANIN",
+              "BANK_PERMATA",
+              "BANK_BUKOPIN",
+              "BANK_MAYBANK"
+            ],
+            "example": "EWALLET_OVO"
+          },
+          "mchId": {
+            "type": "string",
+            "description": "商户ID",
+            "example": "1182047604490003"
+          },
+          "productCode": {
+            "type": "string",
+            "description": "产品代码",
+            "enum": [
+              "DANA",
+              "OVO",
+              "QRIS",
+              "SHOPEEPAY",
+              "LINKAJA",
+              "BANK"
+            ],
+            "example": "OVO"
+          }
+        },
+        "description": "代付入参"
+      },
+      "payinRequestParameter": {
+        "required": [
+          "mchId",
+          "mchOrderNo",
+          "productCode",
+          "userName",
+          "mobile",
+          "email",
+          "amount",
+          "currency",
+          "notifyUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "userName": {
+            "type": "string",
+            "description": "Beneficiary User Name",
+            "example": "SANTOS"
+          },
+          "email": {
+            "type": "string",
+            "description": "User email",
+            "example": "SANTOS@gamil.com"
+          },
+          "mobile": {
+            "type": "string",
+            "description": "mobileNumber",
+            "example": "62852xxxxxxxxxxx"
+          },
+          "amount": {
+            "type": "string",
+            "description": "收款金额",
+            "example": "10000"
+          },
+          "mchOrderNo": {
+            "type": "string",
+            "description": "商户订单号",
+            "example": "238923923"
+          },
+          "notifyUrl": {
+            "type": "string",
+            "description": "商户回调url",
+            "example": "https://xxxx.xxxx.com"
+          },
+          "mchId": {
+            "type": "string",
+            "description": "商户ID",
+            "example": "xxxxxxxx"
+          },
+          "productCode": {
+            "type": "string",
+            "description": "产品代码",
+            "enum": [
+              "DANA",
+              "OVO",
+              "QRIS",
+              "SHOPEEPAY",
+              "LINKAJA"
+            ],
+            "example": "2"
+          },
+          "currency": {
+            "type": "string",
+            "description": "currency",
+            "example": "IDR"
+          }
+        },
+        "description": "代收入参"
+      },
+      "queryBalanceReq": {
+        "required": [
+          "mchId"
+        ],
+        "type": "object",
+        "properties": {
+          "mchId": {
+            "type": "string",
+            "description": "商户ID",
+            "example": "xxxx"
+          }
+        },
+        "description": "查询余额参数"
+      },
+      "BaseResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "description": "0表示请求成功,非0表示失败",
+            "example": 0
+          },
+          "message": {
+            "type": "string",
+            "description": "响应消息",
+            "example": "SUCCESS"
+          },
+          "data": {
+            "type": "object",
+            "description": "业务数据"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseResponse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "integer",
+                "description": "错误码",
+                "example": 1001
+              },
+              "message": {
+                "type": "string",
+                "description": "错误描述",
+                "example": "参数错误"
+              },
+              "data": {
+                "type": "object",
+                "nullable": true,
+                "example": null
+              }
+            }
+          }
+        ]
+      },
+      "PayoutCreateResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseResponse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/payoutRspParameter"
+              }
+            }
+          }
+        ]
+      },
+      "payoutRspParameter": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "付款金额",
+            "example": "10000"
+          },
+          "mchOrderNo": {
+            "type": "string",
+            "description": "商户订单号",
+            "example": "239029832938923"
+          },
+          "transId": {
+            "type": "string",
+            "description": "transId",
+            "example": "239029832938923"
+          },
+          "mchId": {
+            "type": "string",
+            "description": "商户ID",
+            "example": "1182047604490003"
+          }
+        },
+        "description": "代付响应参数"
+      },
+      "PayinCreateResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseResponse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/payinRspParameter"
+              }
+            }
+          }
+        ]
+      },
+      "payinRspParameter": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "付款金额",
+            "example": "10000"
+          },
+          "mchOrderNo": {
+            "type": "string",
+            "description": "商户订单号",
+            "example": "239029832938923"
+          },
+          "transId": {
+            "type": "string",
+            "description": "transId",
+            "example": "239029832938923"
+          },
+          "mchId": {
+            "type": "string",
+            "description": "商户ID",
+            "example": "1182047604490003"
+          },
+          "payUrl": {
+            "type": "string",
+            "description": "付款链接",
+            "example": "https://payment.example.com/123456"
+          },
+          "payCode": {
+            "type": "string",
+            "description": "生成二维码内容，QRIS支付时返回",
+            "example": "qrcode"
+          }
+        },
+        "description": "代收响应参数"
+      },
+      "QueryCreateResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseResponse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/QueryRspParameter"
+              }
+            }
+          }
+        ]
+      },
+      "QueryRspParameter": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "付款金额",
+            "example": "10000"
+          },
+          "mchOrderNo": {
+            "type": "string",
+            "description": "商户订单号",
+            "example": "239029832938923"
+          },
+          "transId": {
+            "type": "string",
+            "description": "transId",
+            "example": "239029832938923"
+          },
+          "mchId": {
+            "type": "string",
+            "description": "商户ID",
+            "example": "1182047604490003"
+          },
+          "status": {
+            "type": "string",
+            "description": "订单状态：0：成功、1：处理中、2：失败",
+            "example": "0"
+          }
+        },
+        "description": "查询响应参数"
+      },
+      "BalanceResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseResponse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/BalanceRspParameter"
+              }
+            }
+          }
+        ]
+      },
+      "BalanceRspParameter": {
+        "type": "object",
+        "properties": {
+          "availableAmount": {
+            "type": "string",
+            "description": "可用余额",
+            "example": "10000"
+          },
+          "frozenAmount": {
+            "type": "string",
+            "description": "冻结金额",
+            "example": "10000"
+          },
+          "mchId": {
+            "type": "string",
+            "description": "商户ID",
+            "example": "1182047604490003"
+          }
+        },
+        "description": "查询响应参数"
+      },
+      "ProductCodeEnum": {
+        "type": "string",
+        "description": "产品代码枚举",
+        "enum": [
+          "DANA",
+          "OVO",
+          "QRIS",
+          "SHOPEEPAY",
+          "LINKAJA",
+          "BANK"
+        ],
+        "x-enum-descriptions": {
+          "DANA": "DANA电子钱包",
+          "OVO": "OVO电子钱包",
+          "QRIS": "扫码支付",
+          "SHOPEEPAY": "SHOPEEPAY电子钱包",
+          "LINKAJA": "LINKAJA电子钱包",
+          "BANK": "银行转账"
+        }
+      },
+      "BankCodeEnum": {
+        "type": "string",
+        "description": "银行代码枚举",
+        "enum": [
+          "EWALLET_DANA",
+          "EWALLET_OVO",
+          "EWALLET_SHOPEEPAY",
+          "EWALLET_LINKAJA",
+          "BANK_BCA",
+          "BANK_BNI",
+          "BANK_BRI",
+          "BANK_MANDIRI",
+          "BANK_CIMB",
+          "BANK_DANAMON",
+          "BANK_OCBC_NISP",
+          "BANK_PANIN",
+          "BANK_PERMATA",
+          "BANK_BUKOPIN",
+          "BANK_MAYBANK"
+        ],
+        "x-enum-descriptions": {
+          "EWALLET_DANA": "DANA电子钱包",
+          "EWALLET_OVO": "OVO电子钱包",
+          "EWALLET_SHOPEEPAY": "SHOPEEPAY电子钱包",
+          "EWALLET_LINKAJA": "LINKAJA电子钱包",
+          "BANK_BCA": "Bank Central Asia",
+          "BANK_BNI": "Bank Negara Indonesia",
+          "BANK_BRI": "Bank Rakyat Indonesia",
+          "BANK_MANDIRI": "Bank Mandiri",
+          "BANK_CIMB": "CIMB Bank",
+          "BANK_DANAMON": "Bank Danamon",
+          "BANK_OCBC_NISP": "OCBC NISP Bank",
+          "BANK_PANIN": "Panin Bank",
+          "BANK_PERMATA": "Bank Permata",
+          "BANK_BUKOPIN": "Bank Bukopin",
+          "BANK_MAYBANK": "Maybank Indonesia"
+        }
+      }
+    }
+  }
+}
