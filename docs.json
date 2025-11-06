@@ -12,7 +12,7 @@
     "groups": [
     {
       "group": "API reference",
-      "openapi": "apidoc.json"
+      "openapi": "https://merchant-test.taropay.com/customer/v3/api-docs"
     }
   ]
   },
