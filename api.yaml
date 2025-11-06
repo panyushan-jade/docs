@@ -1,0 +1,2152 @@
+---
+openapi: 3.0.1
+info:
+  title: 后台api平台接口v1.0
+  x-logo:
+    url: "taropay-logo.svg"
+    altText: "TaroPay"
+    backgroundColor: "transparent"
+servers:
+  - url: "https://sandbosx.taropay.com/api"
+    description: "测试环境"
+  - url: "https://payment.taropay.com/api"
+    description: "生产环境"
+tags:
+  - name: 接入指引
+    description: |
+    
+      ## 一、基本原则
+      ### 环境信息
+      | 类型         | 值                                 |
+      |--------------|-----------------------------------|
+      | 测试API地址  | https://sandbosx.taropay.com/api       |
+      | 生产API地址  | https://payment.taropay.com/api       |
+      | 服务器时间   | GMT+7                             |
+
+      ### 字符编码
+      - 所有请求和响应均使用UTF-8编码
+
+      ### 参数格式：
+      - 所有API接口都为POST请求
+      - 请求和响应数据格式均为JSON：Content-Type: application/json;charset=utf-8
+      
+      ### 返回参数：
+       ```
+      {
+        "code":0,
+        "message":"SUCCESS",
+        "data":{
+            ...
+        }
+      } 
+      ```
+      | Field    | Type      | Description |
+      |----------|-----------|------|
+      | code     | Integer   | 0表示请求成功,非0表示失败  |
+      | message  | String    | 响应消息                |
+      | data     | Object    | 描述业务调用情况的返回值，具体请参照业务接口中每个接口的data值   |
+
+
+      ### 商户请求Header信息
+      | Field        | Type   |      Reuired  | Description |
+      |------------------|---------|---------|-----------------------|
+      | X-API-TIMESTAMP  | string |   Yes   | 当前请求的时间戳，精确到毫秒  |
+      | X-API-SIGN       | string |   Yes   | 签名字符串，详见签名机制  |
+      | Content-Type     | string |   Yes   | 请求头类型   |
+
+      ### 平台回调商户Header信息
+      | Field        | Type   |      Reuired  | Description |
+      |------------------|---------|---------|-----------------------|
+      | X-API-TIMESTAMP  | string |   Yes   | 当前请求的时间戳，精确到毫秒  |
+      | X-API-SIGN       | string |   Yes   | 签名字符串，详见签名机制  |
+      | Content-Type     | string |   Yes   | 请求头类型   |
+
+
+      ## 二、签名规则
+      **商户在调用 Taropay API接口时，需将请求方法,请求路径,请求时间戳以及业务参数，按照 Taropay 约定好的形式，获取到对应的签名字符串，并作为请求头参数X-API-SIGN传递给 Taropay。**
+
+      ⚠️特别说明:空值不参与签名，请不要将空值的键值对加入到 PARAMS 字符串中！！！
+      
+      ### 商户公私钥生成
+      1. 使用RSA算法生成一对公私钥
+        - 生成RSA密钥对的工具：https://www.metools.info/code/c80.html
+        - 选择密钥长度2048位,密钥格式选择PKCS#8
+
+      2. 将生成的公钥（PublicKey）提供给 Taropay（去除空格换行后在商户后台上传），用于 Taropay 验证商户请求的签名
+
+      3. 将生成的私钥（PrivateKey）妥善保管，用于商户对请求数据进行签名
+
+      ### 签名步骤
+      1. 签名前准备的数据如下：HTTP_METHOD + "|" + HTTP_REQUEST_PATH + "|" + TIMESTAMP + "|" + PARAMS连接完成后，对数据进行签名
+         - HTTP_METHOD: 请求方法，如POST
+         - HTTP_REQUEST_PATH: 请求路径，如/payin/create
+         - TIMESTAMP: 当前请求的时间戳，精确到毫秒
+         - PARAMS: 业务参数，按key的字典序排序后，拼接成 key=value&key=value 的形式
+      2. 使用SHA256withRSA算法，使用您生成的私钥PrivateKey对准备好的数据进行签名
+
+      ### 完整示例
+      对于如下请求
+      | HTTP_METHOD | HTTP_REQUEST_PATH | TIMESTAMP |
+      |----------|-----------|---------|
+      | POST     | /payin/create | 1634567890121 |
+
+      PARAMS:
+      | Parameter| value |
+      |----------|---------|
+      | amount   | 100 |
+      | price    | 100 |
+      
+      签名前的准备数据如下：
+      - 设所有发送或者接收到的数据为集合M，将集合M内非空参数值的参数按照参数名ASCII码从小到大排序（字典序），使用URL键值对的格式（即key1=value1&key2=value2…）拼接成字符串：
+      ```
+      String content = "amount=100&price=100";
+      ```
+      - 将拼接的字符串content 与方法请求信息 MERTHOD 、URL和NONCE以"|"分隔拼接成新的字符串：
+      ```
+      String signData = "POST|/payin/create|1634567890121|" + content;
+      ``` 
+      - 使用您生成的私钥（PrivateKey），对拼接成的数据使用私钥进行SHA256withRSA签名,即生成了用于向 API 服务器进行验证的最终签名
+
+      ### 签名工具参考
+      ### 示例（Java）：
+      ```java
+      import java.nio.charset.StandardCharsets;
+      import java.security.*;
+      import java.security.spec.PKCS8EncodedKeySpec;
+      import java.security.spec.X509EncodedKeySpec;
+      import java.util.*;
+
+      public class RequestRSASignUtil {
+
+          private static final String CHARSET = "UTF-8";
+
+          public static String getSign(String method,String path,String timestamp,Map<String,Object> objectMap,String privateKeyPem) throws Exception {
+              objectMap.remove("sign");
+              String signedValue = method + "|" + path + "|" + timestamp + "|" + sortMapToString(objectMap);
+              System.out.println("signValue:"+signedValue);
+              return signSHA256withRSA(signedValue,privateKeyPem,CHARSET);
+          }
+
+          public boolean verifySign(String method,String path,String timestamp,Map<String,Object> objectMap,String publicKeyPem,String sign) throws Exception {
+              objectMap.remove("sign");
+              String signedValue = method + "|" + path + "|" + timestamp + "|" + sortMapToString(objectMap);
+              System.out.println("verifySign-signValue:"+signedValue);
+              return verifySHA256withRSA(signedValue,publicKeyPem,sign);
+          }
+
+          /**
+          * HA256withRSA签名
+          */
+          public static String signSHA256withRSA(String content, String privateKeyPem, String charset) throws Exception {
+              // 1. 解析PEM格式私钥
+              String privateKeyPEM = privateKeyPem
+                      .replace("-----BEGIN PRIVATE KEY-----", "")
+                      .replace("-----END PRIVATE KEY-----", "")
+                      .replaceAll("\\s+", "");
+              byte[] keyBytes = Base64.getDecoder().decode(privateKeyPEM);
+              PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyBytes);
+              KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+              PrivateKey privateKey = keyFactory.generatePrivate(keySpec);
+
+              // 2. 签名
+              Signature signature = Signature.getInstance("SHA256withRSA");
+              signature.initSign(privateKey);
+              signature.update(content.getBytes(charset));
+              byte[] signed = signature.sign();
+
+              // 3. Base64编码
+              return Base64.getEncoder().encodeToString(signed);
+          }
+
+          /**
+          * 验证SHA256withRSA签名
+          * @param content 签名内容
+          * @param signature 签名值
+          * @return 验证结果
+          */
+          public static boolean verifySHA256withRSA(String content,String publicKeyPem, String signature) throws Exception {
+              // 1. 解析PEM格式公钥
+              String publicKeyPEM = publicKeyPem
+                      .replace("-----BEGIN PUBLIC KEY-----", "")
+                      .replace("-----END PUBLIC KEY-----", "")
+                      .replaceAll("\\s+", "");
+              byte[] keyBytes = Base64.getDecoder().decode(publicKeyPEM);
+              X509EncodedKeySpec keySpec = new X509EncodedKeySpec(keyBytes);
+              KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+              PublicKey publicKey = keyFactory.generatePublic(keySpec);
+
+              // 2. 验证签名
+              Signature sig = Signature.getInstance("SHA256withRSA");
+              sig.initVerify(publicKey);
+              sig.update(content.getBytes(StandardCharsets.UTF_8));
+
+              // 3. Base64解码签名值并验证
+              byte[] signatureBytes = Base64.getDecoder().decode(signature);
+              return sig.verify(signatureBytes);
+          }
+
+
+          public static String sortMapToString(Map<String, Object> map) {
+              List<String> keys = new ArrayList<>(map.keySet());
+              Collections.sort(keys);
+              StringBuilder sb = new StringBuilder();
+              for (int i = 0; i < keys.size(); i++) {
+
+                  String key = keys.get(i);
+                  Object value = map.get(key);
+                  if (value == null || "".equals(value.toString())) {
+                      continue; // 跳过空字段
+                  }
+                  if (sb.length() > 0) {
+                      sb.append("&");
+                  }
+                  sb.append(key).append("=").append(value.toString());
+              }
+              return sb.toString();
+          }
+
+      }
+      ```
+      ## 三、验签规则
+      **Taropay 在回调商户时，会将请求方法,请求路径,请求时间戳以及业务参数，按照 Taropay 约定好的形式，获取到对应的签名字符串，并作为请求头参数X-API-SIGN传递给商户。商户需使用 Taropay 提供的公钥PublicKey对签名进行验证，确保数据的真实性和完整性。**
+     
+      ### 验签步骤
+      1. 准备验签的数据：HTTP_METHOD + "|" + HTTP_REQUEST_PATH + "|" + TIMESTAMP + "|" + PARAMS连接完成后，对数据进行验签
+         - HTTP_METHOD: 请求方法，如POST
+         - HTTP_REQUEST_PATH: 请求路径
+         - TIMESTAMP: 当前请求的时间戳，精确到毫秒,通过请求头进行获取
+         - PARAMS: 业务参数，按key的字典序排序后，拼接成 key=value&key=value 的形式
+      2. 使用SHA256withRSA算法，使用Taropay提供的公钥PublicKey对准备好的数据进行签名，并对响应报文中的X-API-SIGN进行验签
+
+
+      ## 四、回调参数说明
+      ### 代收回调参数说明
+      <span style="color: red;">验签HTTP_REQUEST_PATH为空字符串</span>
+      
+      返回Header参数说明：
+      | 参数名       | 类型    | 必填  | 描述                     |
+      |--------------|---------|-------|--------------------------|
+      | X-RESP-TIMESTAMP | string  | 是    | 请求时间戳，精确到毫秒       |
+      | X-RESP-SIGN      | string  | 是    | 请求数据的签名             |
+
+      返回响应参数说明：
+      | 参数名       | 类型    | 必填  | 描述                     |
+      |--------------|---------|-------|--------------------------|
+      | mchId       | string  | 是    | 商户ID                   |
+      | mchOrderNo  | string  | 是    | 商户订单号               |
+      | transId     | string  | 是    | 平台订单号               |
+      | amount      | number  | 是    | 订单金额                 |
+      | status      | string  | 是    | 订单状态：0：成功、1：处理中、2：失败 |
+      | successDate | string  | 是    | 订单付款时间              |
+
+
+      ### 代付回调参数说明
+      <span style="color: red;">验签HTTP_REQUEST_PATH为空字符串</span>
+      
+      返回Header参数说明：
+      | 参数名       | 类型    | 必填  | 描述                     |
+      |--------------|---------|-------|--------------------------|
+      | X-RESP-TIMESTAMP | string  | 是    | 请求时间戳，精确到毫秒       |
+      | X-RESP-SIGN      | string  | 是    | 请求数据的签名             |
+
+      返回响应参数说明：
+      | 参数名       | 类型    | 必填  | 描述                     |
+      |--------------|---------|-------|--------------------------|
+      | mchId       | string  | 是    | 商户ID                   |
+      | mchOrderNo  | string  | 是    | 商户订单号               |
+      | transId     | string  | 是    | 平台订单号               |
+      | amount      | number  | 是    | 订单金额                 |
+      | status      | string  | 是    | 订单状态：0：成功、1：处理中、2：失败 |
+      | successDate | string  | 是    | 订单付款时间              |
+      | message | string  | 是    | 失败描述              |
+
+      ## 五、附录
+      ### 代收ProductCode枚举
+      | 值 | 产品 | 说明 |
+      |----------|-----------|---------|
+      |  DANA    | DANA电子钱包 |  不可用|
+      |  OVO    | OVO电子钱包 | 不可用 |
+      |  QRIS    | 扫码支付 |  |
+      |  SHOPEEPAY    | SHOPEEPAY |不可用  |
+      |  LINKAJA    | LINKAJA | 不可用 |
+
+
+      ### 代付ProductCode枚举
+      | 值 | 产品 | 说明 |
+      |----------|-----------|---------|
+      |  DANA    | DANA电子钱包 |bankCode值：EWALLET_DANA  |
+      |  OVO    | OVO电子钱包 |  bankCode值：EWALLET_OVO|
+      |  SHOPEEPAY    | SHOPEEPAY | bankCode值：EWALLET_SHOPEEPAY |
+      |  LINKAJA    | LINKAJA |  bankCode值：EWALLET_LINKAJA |
+      |  BANK    | 银行 |  银行bankCode值：通过BankCode枚举银行编码获取 |
+
+      ### 代付BankCode枚举
+      | 银行编码 | Type | 银行名称 |
+      |----------|------|----------|
+      | ANGLOMAS | Bank | Anglomas International Bank |
+      | AMAR | Bank | Bank Amar Indonesia (formerly Anglomas International Bank) |
+      | ABN_AMRO | Bank | Bank ABN Amro |
+      | ACEH | Bank | BPD Aceh |
+      | ACEH_UUS | Bank | BPD Aceh UUS (BPD Istimewa Aceh Syariah) |
+      | ALADIN | Bank | Bank Aladin Syariah (formerly Bank Net Indonesia Syariah) |
+      | BALI | Bank | Bank Pembangunan Daerah Bali |
+      | BANGKOK | Bank | Bangkok Bank |
+      | IBK | Bank | Bank IBK Indonesia (formerly Bank Agris) |
+      | RAYA | Bank | Bank Raya Indonesia (formerly Bank Rakyat Indonesia Agroniaga) |
+      | ANDARA | Bank | Bank Andara（Bank Oke Indonesia） |
+      | ANZ | Bank | Bank ANZ Indonesia |
+      | AGI | Bank | Bank Artha Graha International |
+      | ALLO | Bank | Allo Bank Indonesia (formerly Bank Harda Internasional) |
+      | JAGO | Bank | Bank Jago (formerly Bank Artos Indonesia) |
+      | JAGO_SYR | Bank | Bank Jago Syariah |
+      | KROM | Bank | Krom Bank Indonesia（Bank Bisnis Internasional） |
+      | BANTEN | Bank | BPD Banten (formerly Bank Pundi Indonesia) |
+      | BENGKULU | Bank | BPD Bengkulu |
+      | BNC | Bank | Bank Neo Commerce(BNC) (formerly Bank Yudha Bhakti) |
+      | BNP_PARIBAS | Bank | Bank BNP Paribas |
+      | BUKOPIN | Bank | Bank Bukopin |
+      | BUKOPIN_SYR | Bank | Bank Syariah Bukopin |
+      | BUMI_ARTA | Bank | Bank Bumi Arta |
+      | BCA | Bank | Bank Central Asia (BCA) |
+      | BCA_SYR | Bank | Bank Central Asia (BCA) Syariah |
+      | BCA_DIGITAL | Bank | Bank Royal Indonesia(Bank Digital BCA)(BluBCA) |
+      | BNI | Bank | Bank Negara Indonesia (BNI) |
+      | BNI_SYR | Bank | Bank BNI Syariah |
+      | BOFA | Bank | Bank of America Merill-Lynch（now BofA Securities） |
+      | BOC | Bank | Bank of China (BOC) |
+      | BOI | Bank | Bank of India Indonesia(BOI) |
+      | RBOS | Bank | Royal Bank of Scotland (RBS) |
+      | BJB | Bank | Bank BJB (Bank Jawa Barat) |
+      | BJB_SYR | Bank | Bank BJB Syariah (Bank Jabar Banten Syariah) |
+      | BRI | Bank | Bank Rakyat Indonesia (BRI) |
+      | BRI_SYR | Bank | Bank Syariah BRI |
+      | BSI | Bank | Bank Syariah Indonesia |
+      | BSG | Bank | Bank SulutGo(BANK BSG)(Formerly Bank sulawesi Utara dan Gorontalo) |
+      | BTN | Bank | Bank Tabungan Negara (BTN) |
+      | BTN_UUS | Bank | Bank Tabungan Negara (BTN) UUS |
+      | BTPN | Bank | Bank Tabungan Pensiunan Nasional(BTPN) |
+      | BTPN_SYR | Bank | Bank BTPN Syariah (formerly BTPN UUS and Bank Sahabat Purba Danarta) |
+      | BPR_KS | Bank | BPR Karyajatnika Sadaya |
+      | CAPITAL | Bank | Bank Capital Indonesia |
+      | CNB | Bank | Centratama Nasional Bank |
+      | CCB | Bank | China Construction Bank Indonesia (formerly Bank Antar Daerah and Bank Windu Kentjana International) |
+      | CITIBANK | Bank | Citibank |
+      | CTBC | Bank | Bank Chinatrust Indonesia（Bank CTBC Indonesia） |
+      | CIMB | Bank | Bank CIMB Niaga |
+      | CIMB_UUS | Bank | Bank CIMB Niaga UUS |
+      | COMMONWEALTH | Bank | Bank Commonwealth |
+      | DANAMON | Bank | Bank Danamon |
+      | DANAMON_UUS | Bank | Bank Danamon UUS |
+      | DBS | Bank | Bank DBS Indonesia |
+      | DINAR_INDONESIA | Bank | Bank Dinar Indonesia |
+      | DKI | Bank | Bank DKI |
+      | DKI_UUS | Bank | Bank DKI UUS |
+      | DEUTSCHE | Bank | Deutsche Bank |
+      | EXIMBANK | Bank | Indonesia Eximbank (formerly Bank Ekspor Indonesia) |
+      | JPMORGAN | Bank | JP Morgan Chase Bank |
+      | PRIMA_MASTER | Bank | Prima Master Bank |
+      | STANDARD_CHARTERED | Bank | Standard Chartered Bank |
+      | SUPERBANK | Bank | Bank Fama International（now Super Bank Indonesia） |
+      | GANESHA | Bank | Bank Ganesha |
+      | HANA | Bank | Bank Hana |
+      | HSBC | Bank | HSBC Indonesia (formerly Bank Ekonomi Raharja) |
+      | HSBC_UUS | Bank | Hongkong and Shanghai Bank Corporation (HSBC) UUS |
+      | ICBC | Bank | Bank ICBC Indonesia |
+      | INA_PERDANA | Bank | Bank Ina Perdania |
+      | INDEX_SELINDO | Bank | Bank Index Selindo(BANK HARMONI INTERNATIONAL) |
+      | INTERIM | Bank | Bank Interim Indonesia(formerly Bank Rabobank International Indonesia) |
+      | JASA_JAKARTA | Bank | Bank Jasa Jakarta |
+      | JTRUST | Bank | Bank JTrust Indonesia (formerly Bank Mutiara) |
+      | SEABANK | Bank | Bank Seabank Indonesia (formerly Bank Kesejahteraan Ekonomi) |
+      | MANDIRI | Bank | Bank Mandiri |
+      | MANDIRI_SYR | Bank | Bank Syariah Mandiri |
+      | MANDIRI_TASPEN | Bank | Mandiri Taspen Pos (formerly Bank Sinar Harapan Bali) |
+      | MASPION | Bank | Bank Maspion Indonesia |
+      | MAYAPADA | Bank | Bank Mayapada International |
+      | MAYBANK | Bank | Bank Maybank |
+      | MAYBANK_SYR | Bank | Bank Maybank Syariah Indonesia (Bank Aladin Syariah) |
+      | HIBANK | Bank | Bank Hibank Indonesia(Bank Mayora） |
+      | MEGA | Bank | Bank Mega |
+      | MEGA_SYR | Bank | Bank Syariah Mega |
+      | MESTIKA | Bank | Bank Mestika Dharma |
+      | MITRANIAGA | Bank | Bank MitraNiaga |
+      | MIZUHO | Bank | Bank Mizuho Indonesia |
+      | MNC_INTERNASIONAL | Bank | Bank MNC Internasional |
+      | MUAMALAT | Bank | Bank Muamalat Indonesia |
+      | MULTI_ARTA_SENTOSA | Bank | Bank Multi Arta Sentosa |
+      | MUFG | Bank | Bank of Tokyo Mitsubishi UFJ（MUFG bank） |
+      | NAGA | Bank | Bank Mitraniaga(NAGA) |
+      | NOBU | Bank | Bank Nationalnobu |
+      | NUSANTARA_PARAHYANGAN | Bank | Bank Nusantara Parahyangan |
+      | OCBC | Bank | Bank OCBC NISP |
+      | OCBC_UUS | Bank | Bank OCBC NISP UUS |
+      | OKE | Bank | Bank Oke Indonesia (formerly Bank Andara) |
+      | PANIN | Bank | Bank Panin |
+      | PANIN_SYR | Bank | Bank Panin Syariah |
+      | PERMATA | Bank | Bank Permata |
+      | PERMATA_UUS | Bank | Bank Permata UUS |
+      | PIKKO | Bank | Bank Pikko(Bank Century) |
+      | QNB_INDONESIA | Bank | Bank QNB Indonesia (formerly Bank QNB Kesawan) |
+      | RABOBANK | Bank | Bank Rabobank International Indonesia |
+      | RESONA | Bank | Bank Resona Perdania |
+      | BSS | Bank | Bank Sahabat Sampoerna |
+      | SBI_INDONESIA | Bank | Bank SBI Indonesia |
+      | SHINHAN | Bank | Bank Shinhan Indonesia (formerly Bank Metro Express) |
+      | SINARMAS | Bank | Bank Sinarmas |
+      | SINARMAS_UUS | Bank | Bank Sinarmas UUS |
+      | SMBCI | Bank | Bank Sumitomo Mitsui Indonesia |
+      | UOB | Bank | Bank UOB Indonesia |
+      | VICTORIA_INTERNASIONAL | Bank | Bank Victoria Internasional |
+      | VICTORIA_SYR | Bank | Bank Victoria Syariah |
+      | WOORI_SAUDARA | Bank | Bank Woori Saudara Indonesia 1906 (formerly Bank Himpunan Saudara and Bank Woori Indonesia) |
+      | WOORI | Bank | Bank Woori Indonesia |
+      | DIY | Bank | BPD Daerah Istimewa Yogyakarta (DIY) |
+      | DIY_UUS | Bank | BPD Daerah Istimewa Yogyakarta Syariah (DIY UUS) |
+      | KEB | Bank | Bank KEB Indonesia（Korea Exchange Bank Danamon） |
+      | JENIUS | Bank | Bank Jenius |
+      | JAMBI | Bank | BPD Jambi |
+      | JAMBI_UUS | Bank | BPD Jambi UUS |
+      | JATENG | Bank | Bank Jateng（formerly BPD Jawa Tengah） |
+      | JATENG_SYR | Bank | BPD Jawa Tengah UUS (Bank Jateng Syariah) |
+      | JATIM | Bank | Bank Jatim (Ex BPD Jawa Timur) |
+      | JATIM_SYR | Bank | BPD Jawa Timur UUS (Bank Jatim Syariah) |
+      | KALBAR | Bank | BPD Kalimantan Barat(Bank Kalbar) |
+      | KALBAR_UUS | Bank | BPD Kalimantan Barat UUS |
+      | KALSE | Bank | BPD Kalimantan Selatan (Bank Kalsel) |
+      | KALSE_UUS | Bank | BPD Kalimantan Selatan UUS |
+      | KALTENG | Bank | BPD Kalimantan Tengah(Bank Kalteng) |
+      | KALTIM | Bank | BPD Kalimantan Timur(Bank BPD Kaltim) |
+      | KALTIM_UUS | Bank | BPD Kalimantan Timur UUS |
+      | LAMPUNG | Bank | BPD Lampung |
+      | MALUKU | Bank | BPD Maluku |
+      | NTB | Bank | BPD Nusa Tenggara Barat(Bank NTB) |
+      | NTB_UUS | Bank | BPD Nusa Tenggara Barat UUS |
+      | NTT | Bank | BPD Nusa Tenggara Timur(Bank NTT) |
+      | PAPUA | Bank | BPD Papua |
+      | BRK | Bank | BPD Riau Kepri |
+      | BRK_UUS | Bank | BPD Riau Kepri Syariah |
+      | SULTENG | Bank | BPD Sulawesi Tengah(Bank Sulteng) |
+      | SULTRA | Bank | BPD Sulawesi Tenggara(Bank Sultra) |
+      | SULSELBAR | Bank | BPD Sulselbar |
+      | SULSELBAR_UUS | Bank | BPD Sulselbar UUS |
+      | SULUT | Bank | BPD Sulut |
+      | NAGARI | Bank | BPD Sumatera Barat(Bank Nagari) |
+      | NAGARI_UUS | Bank | BPD Sumatera Barat UUS(Bank Nagari Syariah) |
+      | SUMSEL_BABEL | Bank | BPD Sumsel Babel(BPD Sumatera Selatan Babel) |
+      | SUMSEL_BABEL_UUS | Bank | BPD Sumsel Babel UUS((BPD Sumatera Selatan Babel Syariah) |
+      | SUMUT | Bank | BPD Sumut（BPD Sumatera Utara） |
+      | SUMUT_UUS | Bank | BPD Sumut UUS |
+
+paths:
+  "/payout/create":
+    post:
+      tags:
+      - 代付相关接口
+      summary: 创建代付订单
+      operationId: getOperatingNotice
+      x-code-samples:
+        - lang: curl
+          label: cURL
+          source: |
+            curl -X POST "https://sandbox.zapxpay.com/payout/create" \
+              -H "Content-Type: application/json" \
+              -H "X-API-TIMESTAMP: 1703123456789" \
+              -H "X-API-SIGN: your_signature_here" \
+              -d '{
+                "accountName": "SANTOS",
+                "accountNo": "62852xxxxxxxx",
+                "mobile": "xxxxxx",
+                "accountEmail": "xxx@gmail.com",
+                "currency": "IDR",
+                "amount": "10000",
+                "mchOrderNo": "239029832938923",
+                "notifyUrl": "https://xxx.xxx.com",
+                "bankCode": "EWALLET_OVO",
+                "mchId": "1182047604490003",
+                "productCode": "OVO"
+              }'
+        - lang: javascript
+          label: JavaScript
+          source: |
+            const response = await fetch('https://sandbox.zapxpay.com/payout/create', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-TIMESTAMP': '1703123456789',
+                'X-API-SIGN': 'your_signature_here'
+              },
+              body: JSON.stringify({
+                accountName: 'SANTOS',
+                accountNo: '62852xxxxxxxx',
+                mobile: 'xxxxxx',
+                accountEmail: 'xxx@gmail.com',
+                currency: 'IDR',
+                amount: '10000',
+                mchOrderNo: '239029832938923',
+                notifyUrl: 'https://xxx.xxx.com',
+                bankCode: 'EWALLET_OVO',
+                mchId: '1182047604490003',
+                productCode: 'OVO'
+              })
+            });
+            const data = await response.json();
+        - lang: python
+          label: Python
+          source: |
+            import requests
+            import json
+
+            url = "https://sandbox.zapxpay.com/payout/create"
+            headers = {
+                "Content-Type": "application/json",
+                "X-API-TIMESTAMP": "1703123456789",
+                "X-API-SIGN": "your_signature_here"
+            }
+            data = {
+                "accountName": "SANTOS",
+                "accountNo": "62852xxxxxxxx",
+                "mobile": "xxxxxx",
+                "accountEmail": "xxx@gmail.com",
+                "currency": "IDR",
+                "amount": "10000",
+                "mchOrderNo": "239029832938923",
+                "notifyUrl": "https://xxx.xxx.com",
+                "bankCode": "EWALLET_OVO",
+                "mchId": "1182047604490003",
+                "productCode": "OVO"
+            }
+
+            response = requests.post(url, headers=headers, data=json.dumps(data))
+            result = response.json()
+        - lang: java
+          label: Java
+          source: |
+            import java.net.http.*;
+            import java.net.URI;
+
+            String json = "{\"accountName\":\"SANTOS\",\"accountNo\":\"62852xxxxxxxx\",\"mobile\":\"xxxxxx\",\"accountEmail\":\"xxx@gmail.com\",\"currency\":\"IDR\",\"amount\":\"10000\",\"mchOrderNo\":\"239029832938923\",\"notifyUrl\":\"https://xxx.xxx.com\",\"bankCode\":\"EWALLET_OVO\",\"mchId\":\"1182047604490003\",\"productCode\":\"OVO\"}";
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://sandbox.zapxpay.com/payout/create"))
+                .header("Content-Type", "application/json")
+                .header("X-API-TIMESTAMP", "1703123456789")
+                .header("X-API-SIGN", "your_signature_here")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        - lang: go
+          label: Go
+          source: |
+            package main
+            
+            import (
+                "bytes"
+                "encoding/json"
+                "fmt"
+                "net/http"
+                "io"
+            )
+            
+            type PayoutRequest struct {
+                AccountName  string `json:"accountName"`
+                AccountNo    string `json:"accountNo"`
+                Mobile       string `json:"mobile"`
+                AccountEmail string `json:"accountEmail"`
+                Currency     string `json:"currency"`
+                Amount       string `json:"amount"`
+                MchOrderNo   string `json:"mchOrderNo"`
+                NotifyUrl    string `json:"notifyUrl"`
+                BankCode     string `json:"bankCode"`
+                MchId        string `json:"mchId"`
+                ProductCode  string `json:"productCode"`
+            }
+            
+            func main() {
+                url := "https://sandbox.zapxpay.com/payout/create"
+                
+                requestBody := PayoutRequest{
+                    AccountName:  "SANTOS",
+                    AccountNo:    "62852xxxxxxxx",
+                    Mobile:       "xxxxxx",
+                    AccountEmail: "xxx@gmail.com",
+                    Currency:     "IDR",
+                    Amount:       "10000",
+                    MchOrderNo:   "239029832938923",
+                    NotifyUrl:    "https://xxx.xxx.com",
+                    BankCode:     "EWALLET_OVO",
+                    MchId:        "1182047604490003",
+                    ProductCode:  "OVO",
+                }
+                
+                jsonData, _ := json.Marshal(requestBody)
+                
+                req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+                req.Header.Set("Content-Type", "application/json")
+                req.Header.Set("X-API-TIMESTAMP", "1703123456789")
+                req.Header.Set("X-API-SIGN", "your_signature_here")
+                
+                client := &http.Client{}
+                resp, _ := client.Do(req)
+                defer resp.Body.Close()
+                
+                body, _ := io.ReadAll(resp.Body)
+                fmt.Println(string(body))
+            }
+        - lang: csharp
+          label: C#
+          source: |
+            using System;
+            using System.Net.Http;
+            using System.Text;
+            using System.Threading.Tasks;
+            using Newtonsoft.Json;
+            
+            class Program
+            {
+                static async Task Main(string[] args)
+                {
+                    var client = new HttpClient();
+                    var url = "https://sandbox.zapxpay.com/payout/create";
+                    
+                    var requestBody = new {
+                        accountName = "SANTOS",
+                        accountNo = "62852xxxxxxxx",
+                        mobile = "xxxxxx",
+                        accountEmail = "xxx@gmail.com",
+                        currency = "IDR",
+                        amount = "10000",
+                        mchOrderNo = "239029832938923",
+                        notifyUrl = "https://xxx.xxx.com",
+                        bankCode = "EWALLET_OVO",
+                        mchId = "1182047604490003",
+                        productCode = "OVO"
+                    };
+                    
+                    var json = JsonConvert.SerializeObject(requestBody);
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    
+                    client.DefaultRequestHeaders.Add("X-API-TIMESTAMP", "1703123456789");
+                    client.DefaultRequestHeaders.Add("X-API-SIGN", "your_signature_here");
+                    
+                    var response = await client.PostAsync(url, content);
+                    var responseString = await response.Content.ReadAsStringAsync();
+                    
+                    Console.WriteLine(responseString);
+                }
+            }
+        - lang: ruby
+          label: Ruby
+          source: |
+            require 'net/http'
+            require 'json'
+            require 'uri'
+            
+            uri = URI('https://sandbox.zapxpay.com/payout/create')
+            
+            http = Net::HTTP.new(uri.host, uri.port)
+            http.use_ssl = true
+            
+            request = Net::HTTP::Post.new(uri)
+            request['Content-Type'] = 'application/json'
+            request['X-API-TIMESTAMP'] = '1703123456789'
+            request['X-API-SIGN'] = 'your_signature_here'
+            
+            request.body = {
+              accountName: 'SANTOS',
+              accountNo: '62852xxxxxxxx',
+              mobile: 'xxxxxx',
+              accountEmail: 'xxx@gmail.com',
+              currency: 'IDR',
+              amount: '10000',
+              mchOrderNo: '239029832938923',
+              notifyUrl: 'https://xxx.xxx.com',
+              bankCode: 'EWALLET_OVO',
+              mchId: '1182047604490003',
+              productCode: 'OVO'
+            }.to_json
+            
+            response = http.request(request)
+            puts response.body
+        - lang: php
+          label: PHP
+          source: |
+            <?php
+            $url = 'https://sandbox.zapxpay.com/payout/create';
+            $data = array(
+                'accountName' => 'SANTOS',
+                'accountNo' => '62852xxxxxxxx',
+                'mobile' => 'xxxxxx',
+                'accountEmail' => 'xxx@gmail.com',
+                'currency' => 'IDR',
+                'amount' => '10000',
+                'mchOrderNo' => '239029832938923',
+                'notifyUrl' => 'https://xxx.xxx.com',
+                'bankCode' => 'EWALLET_OVO',
+                'mchId' => '1182047604490003',
+                'productCode' => 'OVO'
+            );
+            
+            $options = array(
+                'http' => array(
+                    'header'  => "Content-Type: application/json\r\n" .
+                                "X-API-TIMESTAMP: 1703123456789\r\n" .
+                                "X-API-SIGN: your_signature_here\r\n",
+                    'method'  => 'POST',
+                    'content' => json_encode($data)
+                )
+            );
+            
+            $context = stream_context_create($options);
+            $result = file_get_contents($url, false, $context);
+            $response = json_decode($result, true);
+            
+            print_r($response);
+            ?>
+      parameters:
+      - name: X-API-TIMESTAMP
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-SIGN
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/payoutRequestParameter"
+        required: true
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayoutCreateResponse"
+              examples:
+                success_response:
+                  summary: 成功响应示例
+                  value:
+                    code: 0
+                    message: "SUCCESS"
+                    data:
+                      transId: "T20231201123456789"
+                      mchOrderNo: "PAY20231201123456"
+                      amount: "100000"
+                      mchId: "1182047604490003"
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_params:
+                  summary: 参数错误示例
+                  value:
+                    code: -1
+                    message: "参数验证失败：accountName不能为空"
+                    data: null
+                
+  "/payout/getOrderInfo":
+    post:
+      tags:
+      - 代付相关接口
+      summary: 查询代付订单
+      operationId: getRemitOrder
+      x-code-samples:
+        - lang: curl
+          label: cURL
+          source: |
+            curl -X POST "https://sandbox.zapxpay.com/payout/getOrderInfo" \
+              -H "Content-Type: application/json" \
+              -H "X-API-TIMESTAMP: 1703123456789" \
+              -H "X-API-SIGN: your_signature_here" \
+              -d '{
+                "mchOrderNo": "2324234234",
+                "mchId": "xxxx"
+              }'
+        - lang: javascript
+          label: JavaScript
+          source: |
+            const response = await fetch('https://sandbox.zapxpay.com/payout/getOrderInfo', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-TIMESTAMP': '1703123456789',
+                'X-API-SIGN': 'your_signature_here'
+              },
+              body: JSON.stringify({
+                mchOrderNo: '2324234234',
+                mchId: 'xxxx'
+              })
+            });
+            const data = await response.json();
+        - lang: python
+          label: Python
+          source: |
+            import requests
+            import json
+
+            url = "https://sandbox.zapxpay.com/payout/getOrderInfo"
+            headers = {
+                "Content-Type": "application/json",
+                "X-API-TIMESTAMP": "1703123456789",
+                "X-API-SIGN": "your_signature_here"
+            }
+            data = {
+                "mchOrderNo": "2324234234",
+                "mchId": "xxxx"
+            }
+
+            response = requests.post(url, headers=headers, data=json.dumps(data))
+            result = response.json()
+        - lang: java
+          label: Java
+          source: |
+            import java.net.http.*;
+            import java.net.URI;
+
+            String json = "{\"mchOrderNo\":\"2324234234\",\"mchId\":\"xxxx\"}";
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://sandbox.zapxpay.com/payout/getOrderInfo"))
+                .header("Content-Type", "application/json")
+                .header("X-API-TIMESTAMP", "1703123456789")
+                .header("X-API-SIGN", "your_signature_here")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        - lang: go
+          label: Go
+          source: |
+            package main
+            
+            import (
+                "bytes"
+                "encoding/json"
+                "fmt"
+                "net/http"
+                "io"
+            )
+            
+            type RequestBody struct {
+                MchOrderNo string `json:"mchOrderNo"`
+                MchId      string `json:"mchId"`
+            }
+            
+            func main() {
+                url := "https://sandbox.zapxpay.com/payout/getOrderInfo"
+                
+                requestBody := RequestBody{
+                    MchOrderNo: "2324234234",
+                    MchId:      "xxxx",
+                }
+                
+                jsonData, _ := json.Marshal(requestBody)
+                
+                req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+                req.Header.Set("Content-Type", "application/json")
+                req.Header.Set("X-API-TIMESTAMP", "1703123456789")
+                req.Header.Set("X-API-SIGN", "your_signature_here")
+                
+                client := &http.Client{}
+                resp, _ := client.Do(req)
+                defer resp.Body.Close()
+                
+                body, _ := io.ReadAll(resp.Body)
+                fmt.Println(string(body))
+            }
+        - lang: csharp
+          label: C#
+          source: |
+            using System;
+            using System.Net.Http;
+            using System.Text;
+            using System.Threading.Tasks;
+            using Newtonsoft.Json;
+            
+            class Program
+            {
+                static async Task Main(string[] args)
+                {
+                    var client = new HttpClient();
+                    var url = "https://sandbox.zapxpay.com/payout/getOrderInfo";
+                    
+                    var requestBody = new {
+                        mchOrderNo = "2324234234",
+                        mchId = "xxxx"
+                    };
+                    
+                    var json = JsonConvert.SerializeObject(requestBody);
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    
+                    client.DefaultRequestHeaders.Add("X-API-TIMESTAMP", "1703123456789");
+                    client.DefaultRequestHeaders.Add("X-API-SIGN", "your_signature_here");
+                    
+                    var response = await client.PostAsync(url, content);
+                    var responseString = await response.Content.ReadAsStringAsync();
+                    
+                    Console.WriteLine(responseString);
+                }
+            }
+        - lang: ruby
+          label: Ruby
+          source: |
+            require 'net/http'
+            require 'json'
+            require 'uri'
+            
+            uri = URI('https://sandbox.zapxpay.com/payout/getOrderInfo')
+            
+            http = Net::HTTP.new(uri.host, uri.port)
+            http.use_ssl = true
+            
+            request = Net::HTTP::Post.new(uri)
+            request['Content-Type'] = 'application/json'
+            request['X-API-TIMESTAMP'] = '1703123456789'
+            request['X-API-SIGN'] = 'your_signature_here'
+            
+            request.body = {
+              mchOrderNo: '2324234234',
+              mchId: 'xxxx'
+            }.to_json
+            
+            response = http.request(request)
+            puts response.body
+        - lang: php
+          label: PHP
+          source: |
+            <?php
+            $url = 'https://sandbox.zapxpay.com/payout/getOrderInfo';
+            $data = array(
+                'mchOrderNo' => '2324234234',
+                'mchId' => 'xxxx'
+            );
+            
+            $options = array(
+                'http' => array(
+                    'header'  => "Content-Type: application/json\r\n" .
+                                "X-API-TIMESTAMP: 1703123456789\r\n" .
+                                "X-API-SIGN: your_signature_here\r\n",
+                    'method'  => 'POST',
+                    'content' => json_encode($data)
+                )
+            );
+            
+            $context = stream_context_create($options);
+            $result = file_get_contents($url, false, $context);
+            $response = json_decode($result, true);
+            
+            print_r($response);
+            ?>
+      parameters:
+      - name: X-API-TIMESTAMP
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-SIGN
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/requestQuery"
+        required: true
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryCreateResponse"
+              examples:
+                success_response:
+                  summary: 成功响应示例
+                  value:
+                    code: 0
+                    message: "SUCCESS"
+                    data:
+                      transId: "T20231201123456789"
+                      mchOrderNo: "PAY20231201123456"
+                      amount: "100000"
+                      mchId: "1182047604490003"
+                      status: "0"
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_params:
+                  summary: 参数错误示例
+                  value:
+                    code: -1
+                    message: "参数错误"
+                    data: null
+  "/payin/create":
+    post:
+      tags:
+      - 代收相关接口
+      summary: 创建代收订单
+      operationId: getCollect
+      x-code-samples:
+        - lang: curl
+          label: cURL
+          source: |
+            curl -X POST "https://sandbox.zapxpay.com/payin/create" \
+              -H "Content-Type: application/json" \
+              -H "X-API-TIMESTAMP: 1703123456789" \
+              -H "X-API-SIGN: your_signature_here" \
+              -d '{
+                "userName": "SANTOS",
+                "email": "SANTOS@gamil.com",
+                "mobile": "0852xxxxxxxxxxx",
+                "amount": "10000",
+                "mchOrderNo": "238923923",
+                "notifyUrl": "https://xxxx.xxxx.com",
+                "mchId": "xxxxxxxx",
+                "productCode": "2",
+                "currency": "IDR"
+              }'
+        - lang: javascript
+          label: JavaScript
+          source: |
+            const response = await fetch('https://sandbox.zapxpay.com/payin/create', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-TIMESTAMP': '1703123456789',
+                'X-API-SIGN': 'your_signature_here'
+              },
+              body: JSON.stringify({
+                userName: 'SANTOS',
+                email: 'SANTOS@gamil.com',
+                mobile: '0852xxxxxxxxxxx',
+                amount: '10000',
+                mchOrderNo: '238923923',
+                notifyUrl: 'https://xxxx.xxxx.com',
+                mchId: 'xxxxxxxx',
+                productCode: '2',
+                currency: 'IDR'
+              })
+            });
+            const data = await response.json();
+        - lang: python
+          label: Python
+          source: |
+            import requests
+            import json
+
+            url = "https://sandbox.zapxpay.com/payin/create"
+            headers = {
+                "Content-Type": "application/json",
+                "X-API-TIMESTAMP": "1703123456789",
+                "X-API-SIGN": "your_signature_here"
+            }
+            data = {
+                "userName": "SANTOS",
+                "email": "SANTOS@gamil.com",
+                "mobile": "0852xxxxxxxxxxx",
+                "amount": "10000",
+                "mchOrderNo": "238923923",
+                "notifyUrl": "https://xxxx.xxxx.com",
+                "mchId": "xxxxxxxx",
+                "productCode": "2",
+                "currency": "IDR"
+            }
+
+            response = requests.post(url, headers=headers, data=json.dumps(data))
+            result = response.json()
+        - lang: java
+          label: Java
+          source: |
+            import java.net.http.*;
+            import java.net.URI;
+
+            String json = "{\"userName\":\"SANTOS\",\"email\":\"SANTOS@gamil.com\",\"mobile\":\"0852xxxxxxxxxxx\",\"amount\":\"10000\",\"mchOrderNo\":\"238923923\",\"notifyUrl\":\"https://xxxx.xxxx.com\",\"mchId\":\"xxxxxxxx\",\"productCode\":\"2\",\"currency\":\"IDR\"}";
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://sandbox.zapxpay.com/payin/create"))
+                .header("Content-Type", "application/json")
+                .header("X-API-TIMESTAMP", "1703123456789")
+                .header("X-API-SIGN", "your_signature_here")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        - lang: go
+          label: Go
+          source: |
+            package main
+            
+            import (
+                "bytes"
+                "encoding/json"
+                "fmt"
+                "net/http"
+                "io"
+            )
+            
+            type PayinRequest struct {
+                UserName    string `json:"userName"`
+                Email       string `json:"email"`
+                Mobile      string `json:"mobile"`
+                Amount      string `json:"amount"`
+                MchOrderNo  string `json:"mchOrderNo"`
+                NotifyUrl   string `json:"notifyUrl"`
+                MchId       string `json:"mchId"`
+                ProductCode string `json:"productCode"`
+                Currency    string `json:"currency"`
+            }
+            
+            func main() {
+                url := "https://sandbox.zapxpay.com/payin/create"
+                
+                requestBody := PayinRequest{
+                    UserName:    "SANTOS",
+                    Email:       "SANTOS@gamil.com",
+                    Mobile:      "62852xxxxxxxxxxx",
+                    Amount:      "10000",
+                    MchOrderNo:  "238923923",
+                    NotifyUrl:   "https://xxxx.xxxx.com",
+                    MchId:       "xxxxxxxx",
+                    ProductCode: "2",
+                    Currency:    "IDR",
+                }
+                
+                jsonData, _ := json.Marshal(requestBody)
+                
+                req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+                req.Header.Set("Content-Type", "application/json")
+                req.Header.Set("X-API-TIMESTAMP", "1703123456789")
+                req.Header.Set("X-API-SIGN", "your_signature_here")
+                
+                client := &http.Client{}
+                resp, _ := client.Do(req)
+                defer resp.Body.Close()
+                
+                body, _ := io.ReadAll(resp.Body)
+                fmt.Println(string(body))
+            }
+        - lang: csharp
+          label: C#
+          source: |
+            using System;
+            using System.Net.Http;
+            using System.Text;
+            using System.Threading.Tasks;
+            using Newtonsoft.Json;
+            
+            class Program
+            {
+                static async Task Main(string[] args)
+                {
+                    var client = new HttpClient();
+                    var url = "https://sandbox.zapxpay.com/payin/create";
+                    
+                    var requestBody = new {
+                        userName = "SANTOS",
+                        email = "SANTOS@gamil.com",
+                        mobile = "62852xxxxxxxxxxx",
+                        amount = "10000",
+                        mchOrderNo = "238923923",
+                        notifyUrl = "https://xxxx.xxxx.com",
+                        mchId = "xxxxxxxx",
+                        productCode = "2",
+                        currency = "IDR"
+                    };
+                    
+                    var json = JsonConvert.SerializeObject(requestBody);
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    
+                    client.DefaultRequestHeaders.Add("X-API-TIMESTAMP", "1703123456789");
+                    client.DefaultRequestHeaders.Add("X-API-SIGN", "your_signature_here");
+                    
+                    var response = await client.PostAsync(url, content);
+                    var responseString = await response.Content.ReadAsStringAsync();
+                    
+                    Console.WriteLine(responseString);
+                }
+            }
+        - lang: ruby
+          label: Ruby
+          source: |
+            require 'net/http'
+            require 'json'
+            require 'uri'
+            
+            uri = URI('https://sandbox.zapxpay.com/payin/create')
+            
+            http = Net::HTTP.new(uri.host, uri.port)
+            http.use_ssl = true
+            
+            request = Net::HTTP::Post.new(uri)
+            request['Content-Type'] = 'application/json'
+            request['X-API-TIMESTAMP'] = '1703123456789'
+            request['X-API-SIGN'] = 'your_signature_here'
+            
+            request.body = {
+              userName: 'SANTOS',
+              email: 'SANTOS@gamil.com',
+              mobile: '62852xxxxxxxxxxx',
+              amount: '10000',
+              mchOrderNo: '238923923',
+              notifyUrl: 'https://xxxx.xxxx.com',
+              mchId: 'xxxxxxxx',
+              productCode: '2',
+              currency: 'IDR'
+            }.to_json
+            
+            response = http.request(request)
+            puts response.body
+        - lang: php
+          label: PHP
+          source: |
+            <?php
+            $url = 'https://sandbox.zapxpay.com/payin/create';
+            $data = array(
+                'userName' => 'SANTOS',
+                'email' => 'SANTOS@gamil.com',
+                'mobile' => '62852xxxxxxxxxxx',
+                'amount' => '10000',
+                'mchOrderNo' => '238923923',
+                'notifyUrl' => 'https://xxxx.xxxx.com',
+                'mchId' => 'xxxxxxxx',
+                'productCode' => '2',
+                'currency' => 'IDR'
+            );
+            
+            $options = array(
+                'http' => array(
+                    'header'  => "Content-Type: application/json\r\n" .
+                                "X-API-TIMESTAMP: 1703123456789\r\n" .
+                                "X-API-SIGN: your_signature_here\r\n",
+                    'method'  => 'POST',
+                    'content' => json_encode($data)
+                )
+            );
+            
+            $context = stream_context_create($options);
+            $result = file_get_contents($url, false, $context);
+            $response = json_decode($result, true);
+            
+            print_r($response);
+            ?>
+      parameters:
+      - name: X-API-TIMESTAMP
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-SIGN
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/payinRequestParameter"
+        required: true
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayinCreateResponse"
+              examples:
+                success_response:
+                  summary: 成功响应示例
+                  value:
+                    code: 0
+                    message: "SUCCESS"
+                    data:
+                      transId: "T20231201123456789"
+                      mchOrderNo: "PAY20231201123456"
+                      amount: "100000"
+                      mchId: "1182047604490003"
+                      payUrl: "https://payment.example.com/123456"
+                      payCode: "qrcode"
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_params:
+                  summary: 参数错误示例
+                  value:
+                    code: -1
+                    message: "参数验证失败：xxxx"
+                    data: null
+  "/payin/getOrderInfo":
+    post:
+      tags:
+      - 代收相关接口
+      summary: 查询代收订单
+      operationId: queryCollectOrder
+      x-code-samples:
+        - lang: curl
+          label: cURL
+          source: |
+            curl -X POST "https://sandbox.zapxpay.com/payin/getOrderInfo" \
+              -H "Content-Type: application/json" \
+              -H "X-API-TIMESTAMP: 1703123456789" \
+              -H "X-API-SIGN: your_signature_here" \
+              -d '{
+                "mchOrderNo": "2324234234",
+                "mchId": "xxxx"
+              }'
+        - lang: javascript
+          label: JavaScript
+          source: |
+            const response = await fetch('https://sandbox.zapxpay.com/payin/getOrderInfo', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-TIMESTAMP': '1703123456789',
+                'X-API-SIGN': 'your_signature_here'
+              },
+              body: JSON.stringify({
+                mchOrderNo: '2324234234',
+                mchId: 'xxxx'
+              })
+            });
+            const data = await response.json();
+        - lang: python
+          label: Python
+          source: |
+            import requests
+            import json
+
+            url = "https://sandbox.zapxpay.com/payin/getOrderInfo"
+            headers = {
+                "Content-Type": "application/json",
+                "X-API-TIMESTAMP": "1703123456789",
+                "X-API-SIGN": "your_signature_here"
+            }
+            data = {
+                "mchOrderNo": "2324234234",
+                "mchId": "xxxx"
+            }
+
+            response = requests.post(url, headers=headers, data=json.dumps(data))
+            result = response.json()
+        - lang: java
+          label: Java
+          source: |
+            import java.net.http.*;
+            import java.net.URI;
+
+            String json = "{\"mchOrderNo\":\"2324234234\",\"mchId\":\"xxxx\"}";
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://sandbox.zapxpay.com/payin/getOrderInfo"))
+                .header("Content-Type", "application/json")
+                .header("X-API-TIMESTAMP", "1703123456789")
+                .header("X-API-SIGN", "your_signature_here")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        - lang: go
+          label: Go
+          source: |
+            package main
+            
+            import (
+                "bytes"
+                "encoding/json"
+                "fmt"
+                "net/http"
+                "io"
+            )
+            
+            type RequestBody struct {
+                MchOrderNo string `json:"mchOrderNo"`
+                MchId      string `json:"mchId"`
+            }
+            
+            func main() {
+                url := "https://sandbox.zapxpay.com/payin/getOrderInfo"
+                
+                requestBody := RequestBody{
+                    MchOrderNo: "2324234234",
+                    MchId:      "xxxx",
+                }
+                
+                jsonData, _ := json.Marshal(requestBody)
+                
+                req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+                req.Header.Set("Content-Type", "application/json")
+                req.Header.Set("X-API-TIMESTAMP", "1703123456789")
+                req.Header.Set("X-API-SIGN", "your_signature_here")
+                
+                client := &http.Client{}
+                resp, _ := client.Do(req)
+                defer resp.Body.Close()
+                
+                body, _ := io.ReadAll(resp.Body)
+                fmt.Println(string(body))
+            }
+        - lang: csharp
+          label: C#
+          source: |
+            using System;
+            using System.Net.Http;
+            using System.Text;
+            using System.Threading.Tasks;
+            using Newtonsoft.Json;
+            
+            class Program
+            {
+                static async Task Main(string[] args)
+                {
+                    var client = new HttpClient();
+                    var url = "https://sandbox.zapxpay.com/payin/getOrderInfo";
+                    
+                    var requestBody = new {
+                        mchOrderNo = "2324234234",
+                        mchId = "xxxx"
+                    };
+                    
+                    var json = JsonConvert.SerializeObject(requestBody);
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    
+                    client.DefaultRequestHeaders.Add("X-API-TIMESTAMP", "1703123456789");
+                    client.DefaultRequestHeaders.Add("X-API-SIGN", "your_signature_here");
+                    
+                    var response = await client.PostAsync(url, content);
+                    var responseString = await response.Content.ReadAsStringAsync();
+                    
+                    Console.WriteLine(responseString);
+                }
+            }
+        - lang: ruby
+          label: Ruby
+          source: |
+            require 'net/http'
+            require 'json'
+            require 'uri'
+            
+            uri = URI('https://sandbox.zapxpay.com/payin/getOrderInfo')
+            
+            http = Net::HTTP.new(uri.host, uri.port)
+            http.use_ssl = true
+            
+            request = Net::HTTP::Post.new(uri)
+            request['Content-Type'] = 'application/json'
+            request['X-API-TIMESTAMP'] = '1703123456789'
+            request['X-API-SIGN'] = 'your_signature_here'
+            
+            request.body = {
+              mchOrderNo: '2324234234',
+              mchId: 'xxxx'
+            }.to_json
+            
+            response = http.request(request)
+            puts response.body
+        - lang: php
+          label: PHP
+          source: |
+            <?php
+            $url = 'https://sandbox.zapxpay.com/payin/getOrderInfo';
+            $data = array(
+                'mchOrderNo' => '2324234234',
+                'mchId' => 'xxxx'
+            );
+            
+            $options = array(
+                'http' => array(
+                    'header'  => "Content-Type: application/json\r\n" .
+                                "X-API-TIMESTAMP: 1703123456789\r\n" .
+                                "X-API-SIGN: your_signature_here\r\n",
+                    'method'  => 'POST',
+                    'content' => json_encode($data)
+                )
+            );
+            
+            $context = stream_context_create($options);
+            $result = file_get_contents($url, false, $context);
+            $response = json_decode($result, true);
+            
+            print_r($response);
+            ?>
+      parameters:
+      - name: X-API-TIMESTAMP
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-SIGN
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/requestQuery"
+        required: true
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryCreateResponse"
+              examples:
+                success_response:
+                  summary: 成功响应示例
+                  value:
+                    code: 0
+                    message: "SUCCESS"
+                    data:
+                      transId: "T20231201123456789"
+                      mchOrderNo: "PAY20231201123456"
+                      amount: "100000"
+                      mchId: "1182047604490003"
+                      status: "0"
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_params:
+                  summary: 参数错误示例
+                  value:
+                    code: -1
+                    message: "参数错误"
+                    data: null
+  "/balanceInfo":
+    post:
+      tags:
+      - 账户相关接口
+      summary: 获取余额信息
+      operationId: getOperatingNotice_1
+      x-code-samples:
+        - lang: curl
+          label: cURL
+          source: |
+            curl -X POST "https://sandbox.zapxpay.com/balanceInfo" \
+              -H "Content-Type: application/json" \
+              -H "X-API-TIMESTAMP: 1703123456789" \
+              -H "X-API-SIGN: your_signature_here" \
+              -d '{
+                "mchId": "xxxx"
+              }'
+        - lang: javascript
+          label: JavaScript
+          source: |
+            const response = await fetch('https://sandbox.zapxpay.com/balanceInfo', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-TIMESTAMP': '1703123456789',
+                'X-API-SIGN': 'your_signature_here'
+              },
+              body: JSON.stringify({
+                mchId: 'xxxx'
+              })
+            });
+            const data = await response.json();
+        - lang: python
+          label: Python
+          source: |
+            import requests
+            import json
+
+            url = "https://sandbox.zapxpay.com/balanceInfo"
+            headers = {
+                "Content-Type": "application/json",
+                "X-API-TIMESTAMP": "1703123456789",
+                "X-API-SIGN": "your_signature_here"
+            }
+            data = {
+                "mchId": "xxxx"
+            }
+
+            response = requests.post(url, headers=headers, data=json.dumps(data))
+            result = response.json()
+        - lang: java
+          label: Java
+          source: |
+            import java.net.http.*;
+            import java.net.URI;
+
+            String json = "{\"mchId\":\"xxxx\"}";
+            
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://sandbox.zapxpay.com/balanceInfo"))
+                .header("Content-Type", "application/json")
+                .header("X-API-TIMESTAMP", "1703123456789")
+                .header("X-API-SIGN", "your_signature_here")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        - lang: go
+          label: Go
+          source: |
+            package main
+            
+            import (
+                "bytes"
+                "encoding/json"
+                "fmt"
+                "net/http"
+                "io"
+            )
+            
+            type BalanceRequest struct {
+                MchId string `json:"mchId"`
+            }
+            
+            func main() {
+                url := "https://sandbox.zapxpay.com/balanceInfo"
+                
+                requestBody := BalanceRequest{
+                    MchId: "xxxx",
+                }
+                
+                jsonData, _ := json.Marshal(requestBody)
+                
+                req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+                req.Header.Set("Content-Type", "application/json")
+                req.Header.Set("X-API-TIMESTAMP", "1703123456789")
+                req.Header.Set("X-API-SIGN", "your_signature_here")
+                
+                client := &http.Client{}
+                resp, _ := client.Do(req)
+                defer resp.Body.Close()
+                
+                body, _ := io.ReadAll(resp.Body)
+                fmt.Println(string(body))
+            }
+        - lang: csharp
+          label: C#
+          source: |
+            using System;
+            using System.Net.Http;
+            using System.Text;
+            using System.Threading.Tasks;
+            using Newtonsoft.Json;
+            
+            class Program
+            {
+                static async Task Main(string[] args)
+                {
+                    var client = new HttpClient();
+                    var url = "https://sandbox.zapxpay.com/balanceInfo";
+                    
+                    var requestBody = new {
+                        mchId = "xxxx"
+                    };
+                    
+                    var json = JsonConvert.SerializeObject(requestBody);
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    
+                    client.DefaultRequestHeaders.Add("X-API-TIMESTAMP", "1703123456789");
+                    client.DefaultRequestHeaders.Add("X-API-SIGN", "your_signature_here");
+                    
+                    var response = await client.PostAsync(url, content);
+                    var responseString = await response.Content.ReadAsStringAsync();
+                    
+                    Console.WriteLine(responseString);
+                }
+            }
+        - lang: ruby
+          label: Ruby
+          source: |
+            require 'net/http'
+            require 'json'
+            require 'uri'
+            
+            uri = URI('https://sandbox.zapxpay.com/balanceInfo')
+            
+            http = Net::HTTP.new(uri.host, uri.port)
+            http.use_ssl = true
+            
+            request = Net::HTTP::Post.new(uri)
+            request['Content-Type'] = 'application/json'
+            request['X-API-TIMESTAMP'] = '1703123456789'
+            request['X-API-SIGN'] = 'your_signature_here'
+            
+            request.body = {
+              mchId: 'xxxx'
+            }.to_json
+            
+            response = http.request(request)
+            puts response.body
+        - lang: php
+          label: PHP
+          source: |
+            <?php
+            $url = 'https://sandbox.zapxpay.com/balanceInfo';
+            $data = array(
+                'mchId' => 'xxxx'
+            );
+
+            $options = array(
+                'http' => array(
+                    'header'  => "Content-Type: application/json\r\n" .
+                                "X-API-TIMESTAMP: 1703123456789\r\n" .
+                                "X-API-SIGN: your_signature_here\r\n",
+                    'method'  => 'POST',
+                    'content' => json_encode($data)
+                )
+            );
+
+            $context = stream_context_create($options);
+            $result = file_get_contents($url, false, $context);
+            $response = json_decode($result, true);
+
+            print_r($response);
+            ?>
+      parameters:
+      - name: X-API-TIMESTAMP
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-SIGN
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/queryBalanceReq"
+        required: true
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BalanceResponse"
+              examples:
+                success_response:
+                  summary: 成功响应示例
+                  value:
+                    code: 0
+                    message: "SUCCESS"
+                    data:
+                      frozenAmount: 23232.00
+                      availableAmount: 100000.23
+                      mchId: "1182047604490003"
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_params:
+                  summary: 参数错误示例
+                  value:
+                    code: -1
+                    message: "请求参数错误"
+                    data: null
+components:
+  schemas:
+    requestQuery:
+      required:
+        - mchId
+        - mchOrderNo
+      type: object
+      properties:
+        mchOrderNo:
+          type: string
+          description: 商户订单号
+          example: '2324234234'
+        transId:
+          type: string
+          description: 平台订单号
+          example: '2324234234'
+        mchId:
+          type: string
+          description: 商户ID
+          example: xxxx
+      description: 查询订单参数
+    payoutRequestParameter:
+      required:
+        - mchId
+        - mchOrderNo
+        - productCode
+        - bankCode
+        - accountName
+        - accountNo
+        - mobile
+        - accountEmail
+        - amount
+        - currency
+        - notifyUrl
+      type: object
+      properties:
+        accountName:
+          type: string
+          description: 收款人姓名
+          example: SANTOS
+        accountNo:
+          type: string
+          description: 收款账户
+          example: 'xxxxxxxxxxxx'
+        mobile:
+          type: string
+          description: 手机号,**以628开头,注意：电子钱包代付、OVO收款时，手机号必须真实**
+          example: xxxxxx
+        accountEmail:
+          type: string
+          description: 收款人邮箱
+          example: xxx@gmail.com
+        currency:
+          type: string
+          description: currency
+          example: IDR
+        amount:
+          type: string
+          description: 付款金额
+          example: '10000'
+        mchOrderNo:
+          type: string
+          description: 商户订单号
+          example: '239029832938923'
+        notifyUrl:
+          type: string
+          description: 商户回调URL
+          example: https://xxx.xxx.com
+        bankCode:
+          type: string
+          description: 银行代码
+          enum:
+            - EWALLET_DANA
+            - EWALLET_OVO
+            - EWALLET_SHOPEEPAY
+            - EWALLET_LINKAJA
+            - BANK_BCA
+            - BANK_BNI
+            - BANK_BRI
+            - BANK_MANDIRI
+            - BANK_CIMB
+            - BANK_DANAMON
+            - BANK_OCBC_NISP
+            - BANK_PANIN
+            - BANK_PERMATA
+            - BANK_BUKOPIN
+            - BANK_MAYBANK
+          example: EWALLET_OVO
+        mchId:
+          type: string
+          description: 商户ID
+          example: '1182047604490003'
+        productCode:
+          type: string
+          description: 产品代码
+          enum:
+            - DANA
+            - OVO
+            - QRIS
+            - SHOPEEPAY
+            - LINKAJA
+            - BANK
+          example: OVO
+      description: 代付入参
+    payinRequestParameter:
+      required:
+        - mchId
+        - mchOrderNo
+        - productCode
+        - userName
+        - mobile
+        - email
+        - amount
+        - currency
+        - notifyUrl
+      type: object
+      properties:
+        userName:
+          type: string
+          description: Beneficiary User Name
+          example: SANTOS
+        email:
+          type: string
+          description: User email
+          example: SANTOS@gamil.com
+        mobile:
+          type: string
+          description: mobileNumber
+          example: '62852xxxxxxxxxxx'
+        amount:
+          type: string
+          description: 收款金额
+          example: '10000'
+        mchOrderNo:
+          type: string
+          description: 商户订单号
+          example: '238923923'
+        notifyUrl:
+          type: string
+          description: 商户回调url
+          example: https://xxxx.xxxx.com
+        mchId:
+          type: string
+          description: 商户ID
+          example: xxxxxxxx
+        productCode:
+          type: string
+          description: 产品代码
+          enum:
+            - DANA
+            - OVO
+            - QRIS
+            - SHOPEEPAY
+            - LINKAJA
+          example: "2"
+        currency:
+          type: string
+          description: currency
+          example: IDR
+      description: 代收入参
+    queryBalanceReq:
+      required:
+        - mchId
+      type: object
+      properties:
+        mchId:
+          type: string
+          description: 商户ID
+          example: xxxx
+      description: 查询余额参数
+    # 基础响应结构
+    BaseResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          description: 0表示请求成功,非0表示失败
+          example: 0
+        message:
+          type: string
+          description: 响应消息
+          example: "SUCCESS"
+        data:
+          type: object
+          description: 业务数据
+      # 错误响应
+    ErrorResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            code:
+              type: integer
+              description: 错误码
+              example: 1001
+            message:
+              type: string
+              description: 错误描述
+              example: "参数错误"
+            data:
+              type: object
+              nullable: true
+              example: null
+    # 代付创建响应
+    PayoutCreateResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/payoutRspParameter'
+    payoutRspParameter:
+      type: object
+      properties:
+        amount:
+          type: string
+          description: 付款金额
+          example: '10000'
+        mchOrderNo:
+          type: string
+          description: 商户订单号
+          example: '239029832938923'
+        transId:
+          type: string
+          description: transId
+          example: '239029832938923'
+        mchId:
+          type: string
+          description: 商户ID
+          example: '1182047604490003'
+      description: 代付响应参数
+    # 代收创建响应
+    PayinCreateResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/payinRspParameter'
+    payinRspParameter:
+      type: object
+      properties:
+        amount:
+          type: string
+          description: 付款金额
+          example: '10000'
+        mchOrderNo:
+          type: string
+          description: 商户订单号
+          example: '239029832938923'
+        transId:
+          type: string
+          description: transId
+          example: '239029832938923'
+        mchId:
+          type: string
+          description: 商户ID
+          example: '1182047604490003'
+        payUrl:
+          type: string
+          description: 付款链接
+          example: 'https://payment.example.com/123456'
+        payCode:
+          type: string
+          description: 生成二维码内容，QRIS支付时返回
+          example: 'qrcode'
+      description: 代收响应参数
+       # 查询创建响应
+    
+    QueryCreateResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/QueryRspParameter'
+    QueryRspParameter:
+      type: object
+      properties:
+        amount:
+          type: string
+          description: 付款金额
+          example: '10000'
+        mchOrderNo:
+          type: string
+          description: 商户订单号
+          example: '239029832938923'
+        transId:
+          type: string
+          description: transId
+          example: '239029832938923'
+        mchId:
+          type: string
+          description: 商户ID
+          example: '1182047604490003'
+        status:
+          type: string
+          description: 订单状态：0：成功、1：处理中、2：失败
+          example: '0'
+      description: 查询响应参数
+    BalanceResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/BalanceRspParameter'
+    BalanceRspParameter:
+      type: object
+      properties:
+        availableAmount:
+          type: BigDecimal
+          description: 可用余额
+          example: '10000'
+        frozenAmount:
+          type: BigDecimal
+          description: 冻结金额
+          example: '10000'
+        mchId:
+          type: string
+          description: 商户ID
+          example: '1182047604490003'
+      description: 查询响应参数
+    
+    # 枚举定义
+    ProductCodeEnum:
+      type: string
+      description: 产品代码枚举
+      enum:
+        - DANA
+        - OVO
+        - QRIS
+        - SHOPEEPAY
+        - LINKAJA
+        - BANK
+      x-enum-descriptions:
+        DANA: DANA电子钱包
+        OVO: OVO电子钱包
+        QRIS: 扫码支付
+        SHOPEEPAY: SHOPEEPAY电子钱包
+        LINKAJA: LINKAJA电子钱包
+        BANK: 银行转账
+    
+    BankCodeEnum:
+      type: string
+      description: 银行代码枚举
+      enum:
+        - EWALLET_DANA
+        - EWALLET_OVO
+        - EWALLET_SHOPEEPAY
+        - EWALLET_LINKAJA
+        - BANK_BCA
+        - BANK_BNI
+        - BANK_BRI
+        - BANK_MANDIRI
+        - BANK_CIMB
+        - BANK_DANAMON
+        - BANK_OCBC_NISP
+        - BANK_PANIN
+        - BANK_PERMATA
+        - BANK_BUKOPIN
+        - BANK_MAYBANK
+      x-enum-descriptions:
+        EWALLET_DANA: DANA电子钱包
+        EWALLET_OVO: OVO电子钱包
+        EWALLET_SHOPEEPAY: SHOPEEPAY电子钱包
+        EWALLET_LINKAJA: LINKAJA电子钱包
+        BANK_BCA: Bank Central Asia
+        BANK_BNI: Bank Negara Indonesia
+        BANK_BRI: Bank Rakyat Indonesia
+        BANK_MANDIRI: Bank Mandiri
+        BANK_CIMB: CIMB Bank
+        BANK_DANAMON: Bank Danamon
+        BANK_OCBC_NISP: OCBC NISP Bank
+        BANK_PANIN: Panin Bank
+        BANK_PERMATA: Bank Permata
+        BANK_BUKOPIN: Bank Bukopin
+        BANK_MAYBANK: Maybank Indonesia
